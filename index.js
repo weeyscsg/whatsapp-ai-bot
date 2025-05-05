@@ -125,7 +125,7 @@ app.post('/webhook', async (req, res) => {
       const triggerKeywords = ["install", "setup", "software", "bartender"];
       const lowerMessage = message.toLowerCase();
 
-      const configKeywords = ["driver", "configuration", "speed", "darkness"];
+      const configKeywords = ['driver', 'configuration', 'speed', 'darkness', 'print', 'lighter', 'faded', 'faint', 'ink', 'label too light'];
       const matchConfig = configKeywords.some(k => lowerMessage.includes(k) && lowerMessage.includes("tsc"));
 
       if (matchConfig) {
