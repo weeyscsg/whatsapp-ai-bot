@@ -13,7 +13,7 @@ const PORT = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
 
-// Cloudinary setup (optional)
+// Cloudinary setup
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
@@ -57,7 +57,7 @@ If the user asks about installing software for any TSC desktop or industrial pri
 Always match the user's language. If unsure, reply in English.
 `;
 
-const webhookHandler = async (req, res) => {
+app.post('/webhook', async (req, res) => {
   console.log("RAW WEBHOOK DATA:", JSON.stringify(req.body, null, 2));
   try {
     const messageObject = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
@@ -127,8 +127,7 @@ const webhookHandler = async (req, res) => {
       const matchesTSCInstall = triggerKeywords.some(k => lowerMessage.includes(k) && lowerMessage.includes("tsc"));
 
       if (matchesTSCInstall) {
-        const tutorialLink = "Sure! You can follow this tutorial to install BarTender software for any TSC desktop or industrial printer:
-https://wa.me/p/25438061125807295/60102317781";
+        const tutorialLink = "Sure! You can follow this tutorial to install BarTender software for any TSC desktop or industrial printer: https://wa.me/p/25438061125807295/60102317781";
         await axios.post(`https://graph.facebook.com/v18.0/${process.env.PHONE_NUMBER_ID}/messages`, {
           messaging_product: "whatsapp",
           to: from,
@@ -176,9 +175,7 @@ https://wa.me/p/25438061125807295/60102317781";
     console.error("Unexpected error in /webhook:", err);
     res.sendStatus(500);
   }
-};
-
-app.post('/webhook', webhookHandler);
+});
 
 app.listen(PORT, () => {
   console.log(`Bot server is running on port ${PORT}`);
