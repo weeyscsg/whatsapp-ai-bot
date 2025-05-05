@@ -125,3 +125,4 @@ Otherwise, answer in a helpful and concise way.
 app.listen(PORT, () => {
   console.log(`Bot server is running on port ${PORT}`);
 });
+ECHO is on.
