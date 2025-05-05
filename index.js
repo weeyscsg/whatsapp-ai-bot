@@ -124,6 +124,30 @@ app.post('/webhook', async (req, res) => {
       const message = messageObject.text.body;
       const triggerKeywords = ["install", "setup", "software", "bartender"];
       const lowerMessage = message.toLowerCase();
+
+      const configKeywords = ["driver", "configuration", "speed", "darkness"];
+      const matchConfig = configKeywords.some(k => lowerMessage.includes(k) && lowerMessage.includes("tsc"));
+
+      if (matchConfig) {
+        const lang = lowerMessage.match(/[\u4e00-\u9fff]/) ? "zh" : lowerMessage.includes("sila") ? "bm" : "en";
+        const driverMessage = {
+          "en": "You can follow this tutorial for TSC driver and configuration settings (speed, darkness, etc): https://wa.me/p/8073532716014276/60102317781",
+          "zh": "如果您需要设置 TSC 打印机的驱动程序、速度或浓度，请参考这个教程： https://wa.me/p/8073532716014276/60102317781",
+          "bm": "Jika anda perlukan bantuan untuk tetapan driver atau kelajuan/cetakan TSC, sila rujuk tutorial ini: https://wa.me/p/8073532716014276/60102317781"
+        }[lang];
+
+        await axios.post(`https://graph.facebook.com/v18.0/${process.env.PHONE_NUMBER_ID}/messages`, {
+          messaging_product: "whatsapp",
+          to: from,
+          text: { body: driverMessage }
+        }, {
+          headers: {
+            Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        return res.sendStatus(200);
+      }
       const matchesTSCInstall = triggerKeywords.some(k => lowerMessage.includes(k) && lowerMessage.includes("tsc"));
 
       if (matchesTSCInstall) {
