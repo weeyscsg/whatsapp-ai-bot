@@ -55,6 +55,15 @@ If the user asks about installing software for any TSC desktop or industrial pri
 "Sudah tentu! Anda boleh ikuti tutorial WhatsApp ini untuk memasang perisian BarTender: https://wa.me/p/25438061125807295/60102317781"
 
 Always match the user's language. If unsure, reply in English.
+
+If the user did not mention their printer model (e.g., TSC TE200, Zebra ZD420),
+kindly ask:
+[EN] "Before I assist, may I know your printer model?"
+[中文] "在我帮助您之前，请问您使用的打印机型号是？"
+[BM] "Sebelum saya bantu, boleh saya tahu model pencetak anda?"
+
+Only proceed with support once a model is provided.
+
 `;
 
 app.post('/webhook', async (req, res) => {
