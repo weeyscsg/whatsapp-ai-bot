@@ -3,6 +3,9 @@ require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
+const FormData = require('form-data');
 const cloudinary = require('cloudinary').v2;
 
 const app = express();
@@ -10,7 +13,7 @@ const PORT = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
 
-// Cloudinary setup (if needed)
+// Cloudinary setup (optional)
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
@@ -32,57 +35,113 @@ app.get('/webhook', (req, res) => {
   }
 });
 
-// Incoming WhatsApp message
-app.post('/webhook', async (req, res) => {
-  console.log("RAW WEBHOOK DATA:", JSON.stringify(req.body, null, 2)); // Debug log
+// Multilingual system prompt
+const systemPrompt = `
+You are a support assistant for Zebra and TSC barcode printers.
+You can understand and respond in:
+- English
+- Chinese (Simplified)
+- Malay (Bahasa Melayu)
 
+If the user asks about installing software for any TSC desktop or industrial printer, reply with the appropriate version below:
+
+[EN]
+"Sure! You can follow this tutorial to install BarTender software: https://wa.me/p/25438061125807295/60102317781"
+
+[中文]
+"当然！您可以通过这个 WhatsApp 教程链接安装 BarTender 软件： https://wa.me/p/25438061125807295/60102317781"
+
+[BM]
+"Sudah tentu! Anda boleh ikuti tutorial WhatsApp ini untuk memasang perisian BarTender: https://wa.me/p/25438061125807295/60102317781"
+
+Always match the user's language. If unsure, reply in English.
+`;
+
+const webhookHandler = async (req, res) => {
+  console.log("RAW WEBHOOK DATA:", JSON.stringify(req.body, null, 2));
   try {
     const messageObject = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+    if (!messageObject) return res.sendStatus(200);
 
-    if (!messageObject || messageObject.type !== 'text') {
-      console.log("Not a text message from user. Ignoring.");
-      return res.sendStatus(200);
-    }
-
-    const message = messageObject.text.body;
     const from = messageObject.from;
+    const type = messageObject.type;
 
-    // Keyword-based fast response for TSC software installation
-    const triggerKeywords = ["install", "setup", "software", "bartender"];
-    const lowerMessage = message.toLowerCase();
+    if (type === 'audio') {
+      const mediaId = messageObject.audio.id;
+      const mediaUrlRes = await axios.get(`https://graph.facebook.com/v18.0/${mediaId}`, {
+        headers: { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}` }
+      });
+      const mediaUrl = mediaUrlRes.data.url;
 
-    const matchesTSCInstall = triggerKeywords.some(keyword =>
-      lowerMessage.includes(keyword) && lowerMessage.includes("tsc")
-    );
+      const audioRes = await axios.get(mediaUrl, {
+        responseType: 'arraybuffer',
+        headers: { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}` }
+      });
 
-    if (matchesTSCInstall) {
-      const tutorialLink = "Sure! You can follow this tutorial to install BarTender software for any TSC desktop or industrial printer:\nhttps://wa.me/p/25438061125807295/60102317781";
+      fs.writeFileSync("/tmp/audio.ogg", Buffer.from(audioRes.data));
+      const formData = new FormData();
+      formData.append("file", fs.createReadStream("/tmp/audio.ogg"));
+      formData.append("model", "whisper-1");
 
-      await axios.post(`https://graph.facebook.com/v18.0/${process.env.PHONE_NUMBER_ID}/messages`, {
-        messaging_product: "whatsapp",
-        to: from,
-        text: { body: tutorialLink }
-      }, {
+      const whisperRes = await axios.post("https://api.openai.com/v1/audio/transcriptions", formData, {
         headers: {
-          Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
-          "Content-Type": "application/json"
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          ...formData.getHeaders()
         }
       });
 
-      return res.sendStatus(200); // Stop GPT fallback
+      const transcribedText = whisperRes.data.text;
+
+      const gptRes = await axios.post('https://api.openai.com/v1/chat/completions', {
+        model: "gpt-4-turbo",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: transcribedText }
+        ]
+      }, {
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const reply = gptRes.data.choices?.[0]?.message?.content || "How can I assist you?";
+      await axios.post(`https://graph.facebook.com/v18.0/${process.env.PHONE_NUMBER_ID}/messages`, {
+        messaging_product: "whatsapp",
+        to: from,
+        text: { body: reply }
+      }, {
+        headers: {
+          Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      return res.sendStatus(200);
     }
 
-    // GPT-4 Turbo response fallback
-    const systemPrompt = `
-You are a support assistant for Zebra and TSC barcode printers.
-If the user asks about installing software for any TSC desktop or industrial printer, reply:
-"Sure! You can follow this tutorial to install BarTender software:\nhttps://wa.me/p/25438061125807295/60102317781"
-Otherwise, answer in a helpful and concise way.
-`;
+    if (type === 'text') {
+      const message = messageObject.text.body;
+      const triggerKeywords = ["install", "setup", "software", "bartender"];
+      const lowerMessage = message.toLowerCase();
+      const matchesTSCInstall = triggerKeywords.some(k => lowerMessage.includes(k) && lowerMessage.includes("tsc"));
 
-    let gptReply = "Hi! How can I assist you with your printer?";
+      if (matchesTSCInstall) {
+        const tutorialLink = "Sure! You can follow this tutorial to install BarTender software for any TSC desktop or industrial printer:
+https://wa.me/p/25438061125807295/60102317781";
+        await axios.post(`https://graph.facebook.com/v18.0/${process.env.PHONE_NUMBER_ID}/messages`, {
+          messaging_product: "whatsapp",
+          to: from,
+          text: { body: tutorialLink }
+        }, {
+          headers: {
+            Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        return res.sendStatus(200);
+      }
 
-    try {
       const openaiResponse = await axios.post('https://api.openai.com/v1/chat/completions', {
         model: "gpt-4-turbo",
         messages: [
@@ -91,38 +150,36 @@ Otherwise, answer in a helpful and concise way.
         ]
       }, {
         headers: {
-          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
           'Content-Type': 'application/json'
         }
       });
 
-      gptReply = openaiResponse.data.choices?.[0]?.message?.content || gptReply;
+      const gptReply = openaiResponse.data.choices?.[0]?.message?.content || "Hi! How can I assist you with your printer?";
+      await axios.post(`https://graph.facebook.com/v18.0/${process.env.PHONE_NUMBER_ID}/messages`, {
+        messaging_product: "whatsapp",
+        to: from,
+        text: { body: gptReply }
+      }, {
+        headers: {
+          Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+          'Content-Type': 'application/json'
+        }
+      });
 
-    } catch (err) {
-      console.error("Error calling OpenAI:", err.response?.data || err.message);
+      return res.sendStatus(200);
     }
 
-    // Send GPT reply back to user
-    await axios.post(`https://graph.facebook.com/v18.0/${process.env.PHONE_NUMBER_ID}/messages`, {
-      messaging_product: "whatsapp",
-      to: from,
-      text: { body: gptReply }
-    }, {
-      headers: {
-        Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
-        "Content-Type": "application/json"
-      }
-    });
-
+    console.log("Unsupported message type");
     res.sendStatus(200);
-
   } catch (err) {
     console.error("Unexpected error in /webhook:", err);
     res.sendStatus(500);
   }
-});
+};
+
+app.post('/webhook', webhookHandler);
 
 app.listen(PORT, () => {
   console.log(`Bot server is running on port ${PORT}`);
 });
-ECHO is on.
