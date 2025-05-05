@@ -134,6 +134,31 @@ app.post('/webhook', async (req, res) => {
       const triggerKeywords = ["install", "setup", "software", "bartender"];
       const lowerMessage = message.toLowerCase();
 
+      const tscDriverKeywords = ["driver", "install driver", "setup driver", "where to download", "printer not detected", "usb driver", "windows driver"];
+      const isAskingTscDriver = tscDriverKeywords.some(k => lowerMessage.includes("tsc") && lowerMessage.includes(k));
+
+      if (isAskingTscDriver) {
+        const lang = lowerMessage.match(/[\u4e00-\u9fff]/) ? "zh" : lowerMessage.includes("sila") ? "bm" : "en";
+        const tscDriverMessage = {
+          "en": "You can follow this tutorial to install the official Windows driver for any TSC printer: https://wa.me/p/7261706730612270/60102317781",
+          "zh": "您可以通过这个教程来安装所有 TSC 打印机的 Windows 驱动程序： https://wa.me/p/7261706730612270/60102317781",
+          "bm": "Sila ikuti panduan ini untuk memasang pemacu Windows rasmi bagi mana-mana pencetak TSC: https://wa.me/p/7261706730612270/60102317781"
+        }[lang];
+
+        await axios.post(`https://graph.facebook.com/v18.0/${process.env.PHONE_NUMBER_ID}/messages`, {
+          messaging_product: "whatsapp",
+          to: from,
+          text: { body: tscDriverMessage }
+        }, {
+          headers: {
+            Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        return res.sendStatus(200);
+      }
+
       const configKeywords = ['driver', 'configuration', 'speed', 'darkness', 'print', 'lighter', 'faded', 'faint', 'ink', 'label too light'];
       const matchConfig = configKeywords.some(k => lowerMessage.includes(k) && lowerMessage.includes("tsc"));
 
