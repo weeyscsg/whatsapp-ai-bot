@@ -37,13 +37,15 @@ app.post('/webhook', async (req, res) => {
   console.log("RAW WEBHOOK DATA:", JSON.stringify(req.body, null, 2)); // Debug log
 
   try {
-    const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.text?.body || '';
-    const from = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.from;
+    const messageObject = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
 
-    if (!message || !from) {
-      console.log("No valid message or sender found.");
-      return res.sendStatus(200); // Acknowledge without action
+    if (!messageObject || messageObject.type !== 'text') {
+      console.log("Not a text message from user. Ignoring.");
+      return res.sendStatus(200);
     }
+
+    const message = messageObject.text.body;
+    const from = messageObject.from;
 
     // GPT-4 Turbo response
     let gptReply = "Hi! I’m your Zebra/TSC printer support bot. Please describe your issue.";
