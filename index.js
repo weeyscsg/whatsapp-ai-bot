@@ -2,7 +2,7 @@ import express from 'express';
 import bodyParser from 'body-parser';
 import dotenv from 'dotenv';
 import axios from 'axios';
-import OpenAI from 'openai';
+import { Configuration, OpenAIApi } from 'openai';
 
 // Load environment variables
 dotenv.config();
@@ -11,7 +11,8 @@ const app = express();
 app.use(bodyParser.json());
 
 // OpenAI client setup
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const configuration = new Configuration({ apiKey: process.env.OPENAI_API_KEY });
+const openai = new OpenAIApi(configuration);
 
 // ── COMMAND HANDLERS ────────────────────────────────────────────────────────
 const commandHandlers = [
@@ -41,6 +42,7 @@ async function routeIncoming(from, text) {
 // ── MAIN REPLY GENERATOR ────────────────────────────────────────────────────
 async function generateReply({ from, body, audio }) {
   let message = body || '';
+
   if (audio) {
     try {
       const { transcribeAudio } = await import('node-whisper');
@@ -54,14 +56,12 @@ async function generateReply({ from, body, audio }) {
   if (model) {
     await handlePrinterModelMemory(from, model);
   }
+
   return routeIncoming(from, message);
 }
 
 // ── WEBHOOK HANDLER ─────────────────────────────────────────────────────────
 app.post('/webhook', async (req, res) => {
-  // Log incoming payload for debugging
-  console.log('Webhook payload:', JSON.stringify(req.body));
-
   const messages = req.body.entry
     .flatMap(e => e.changes)
     .flatMap(c => c.value.messages || []);
@@ -102,32 +102,26 @@ async function handlePrinterModelMemory(from, model) {
   return sendText(from, `Got it! Remembering your printer model: ${model}`);
 }
 async function handleGPT4Inquiry(from, text) {
-  const resp = await openai.chat.completions.create({
+  const resp = await openai.createChatCompletion({
     model: 'gpt-4-turbo',
     messages: [{ role: 'user', content: text }],
   });
-  const answer = resp.choices[0].message.content;
-  return sendText(from, answer);
+  return resp.data.choices[0].message.content;
 }
 
 // ── WHATSAPP SENDER ─────────────────────────────────────────────────────────
 async function sendText(to, msg) {
   try {
-    await axios.post(
-      `https://graph.facebook.com/v15.0/${process.env.PHONE_NUMBER_ID}/messages`,
-      {
-        messaging_product: 'whatsapp',
-        to,
-        text: { body: msg }
-      },
-      {
-        headers: { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}` }
-      }
-    );
-    console.log('Sent message to', to, msg);
-  } catch (err) {
-    console.error('Failed to send message:', err.response?.data || err.message);
+    const url = `https://graph.facebook.com/v15.0/${process.env.PHONE_NUMBER_ID}/messages`;
+    const payload = {
+      messaging_product: 'whatsapp',
+      to,
+      text: { body: msg },
+    };
+    const headers = { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}` };
+    const resp = await axios.post(url, payload, { headers });
+    console.log(`Sent message to ${to}: ${msg}`);
+  } catch (error) {
+    console.error('Failed to send message:', error.response?.data || error);
   }
 }
-
-// Note: ensure PHONE_NUMBER_ID and WHATSAPP_TOKEN are set in your .env
