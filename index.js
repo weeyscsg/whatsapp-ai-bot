@@ -107,8 +107,8 @@ async function handleDriverDownload(from) {
 async function handleSoftwareLink(from) {
   const model = getUserModel(from) || '';
   if (/tsc/i.test(model)) {
-    return "Here's your TSC Bartender software link:
-https://wa.me/p/25438061125807295/60102317781";
+    // Fixed single-line string for the TSC Bartender software link
+    return "Here's your TSC Bartender software link: https://wa.me/p/25438061125807295/60102317781";
   }
   return handleGPT4Inquiry(from, `Please find the official download URL for the ${model} labeling software.`);
 }
