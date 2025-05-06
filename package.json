@@ -1,5 +1,5 @@
 {
-+ "type": "module",
+  "type": "module",
   "name": "whatsapp-ai-support-bot",
   "version": "1.0.0",
   "description": "AI Support Bot for Zebra/TSC Printer",
