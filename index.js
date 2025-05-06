@@ -10,10 +10,10 @@ app.use(bodyParser.json());
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// Memory stores
+// In-memory stores
 const userModels = new Map();
+const userSoftwares = new Map();
 
-// Helpers
 function getUserModel(from) {
   const entry = userModels.get(from);
   if (!entry || Date.now() > entry.expires) {
@@ -27,16 +27,33 @@ function setUserModel(from, model) {
   userModels.set(from, { model, expires: Date.now() + 48 * 3600 * 1000 });
 }
 
+function getUserSoftware(from) {
+  const entry = userSoftwares.get(from);
+  if (!entry || Date.now() > entry.expires) {
+    userSoftwares.delete(from);
+    return null;
+  }
+  return entry.software;
+}
+
+function setUserSoftware(from, software) {
+  userSoftwares.set(from, { software, expires: Date.now() + 48 * 3600 * 1000 });
+}
+
 // Regexes
 const MODEL_REGEX = /\b(?:tsc|zebra)[\s\w-]*\d+\w*\b/i;
-const SOFTWARE_REGEX = /\b(?:software|printing software|label\s*matrix|matrix|bartender|teklyn)\b/i;
+const SOFTWARE_NAME_REGEX = /\b(?:Seagull\s+Bartender|Label\s*Matrix|Teklyn\s+Label\s*Matrix)\b/i;
 const CONFIG_REGEX = /(?:blur|light(?:\b|ing)|fade(?:d)?|speed\s*(?:slow|fast)|darkness|dpi|resolution)/i;
-const ERROR_REGEX = /(?:error\s*light|blinking|paper\s*jam|jam\b|out\s*of\s*paper|no\s*paper|alignment|label\s*no\s*feed)/i;
+const ERROR_REGEX = /(?:error\s*light|blinking|paper\s*jam|out\s*of\s*paper|no\s*paper|alignment|label\s*no\s*feed)/i;
 const DRIVER_DOWNLOAD_REGEX = /\b(?:driver|printer driver|download driver)\b/i;
 
-// Extract printer model
+// Extractors
 function extractPrinterModel(text) {
   const m = text.match(MODEL_REGEX);
+  return m ? m[0] : null;
+}
+function extractSoftwareName(text) {
+  const m = text.match(SOFTWARE_NAME_REGEX);
   return m ? m[0] : null;
 }
 
@@ -44,60 +61,69 @@ function extractPrinterModel(text) {
 async function routeIncoming(from, text) {
   text = (text || '').trim();
   const model = getUserModel(from);
+  const softwareSaved = getUserSoftware(from);
 
   // Greeting
   if (/^(hi|hello)$/i.test(text)) {
     return 'Please tell me your printer model or Printing Software first (e.g. "TSC TTP-247" or "Seagull Bartender")';
   }
 
-  // Model entry
-  const m = extractPrinterModel(text);
-  if (m) {
-    setUserModel(from, m);
-    return `Got it! I'll remember your printer model: ${m}`;
+  // Printer Model Entry
+  const detectedModel = extractPrinterModel(text);
+  if (detectedModel) {
+    setUserModel(from, detectedModel);
+    return `Got it! I'll remember your printer model: ${detectedModel}`;
   }
 
-  // Printing Software request (by keyword or brand name)
-  if (SOFTWARE_REGEX.test(text)) {
-    if (!model) {
-      return 'Please tell me your printer model first (e.g. "TSC TTP-247"), then ask for software.';
+  // Software Entry
+  const detectedSoftware = extractSoftwareName(text);
+  if (detectedSoftware) {
+    setUserSoftware(from, detectedSoftware);
+    return `Got it! I'll remember your printing software: ${detectedSoftware}`;
+  }
+
+  // Printing Software request
+  if (/software|printing software/i.test(text)) {
+    if (!model && !softwareSaved) {
+      return 'Please tell me your printer model or printing software first.';
     }
-    // TSC static, Zebra fallback
-    if (/tsc/i.test(model)) {
+    // If TSC printer model saved
+    if (model && /tsc/i.test(model)) {
       return `Here's your TSC Bartender software link:
 https://wa.me/p/25438061125807295/60102317781`;
     }
-    return handleGPT4Inquiry(from, `Find the official download URL for the Zebra ${model} labeling software.`);
+    // If softwareSaved directly
+    if (softwareSaved && /bartender|label matrix|teklyn/i.test(softwareSaved)) {
+      return `Here's your ${softwareSaved} download link:
+https://wa.me/p/25438061125807295/60102317781`;
+    }
+    return handleGPT4Inquiry(from, softwareSaved
+      ? `Find download URL for ${softwareSaved}.`
+      : `Find download URL for the Zebra ${model} labeling software.`);
   }
 
   // Driver configuration queries
   if (CONFIG_REGEX.test(text)) {
     if (!model) {
-      return 'Please tell me your printer model first (e.g. "TSC TTP-247") before configuration queries.';
+      return 'Please tell me your printer model first before configuration queries.';
     }
-    if (/tsc/i.test(model)) {
-      return `For printer driver configuration (speed, darkness, print quality) for your TSC printer, see:
+    return `For printer driver configuration (speed, darkness, print quality) for your ${model}, see:
 https://wa.me/p/8073532716014276/60102317781`;
-    }
-    return handleGPT4Inquiry(from, `Provide configuration steps (speed, darkness, print quality) for the ${model} printer.`);
   }
 
-  // Error / jam / out-of-paper queries
+  // Error/jam queries
   if (ERROR_REGEX.test(text)) {
     if (!model) {
-      return 'Please tell me your printer model first (e.g. "TSC TTP-247") before troubleshooting.';
+      return 'Please tell me your printer model first before troubleshooting.';
     }
-    if (/tsc/i.test(model)) {
-      return `For paper jams, out-of-paper, alignment issues, red/error-light on TSC printers:${'
-'}https://wa.me/p/6828296190606265/60102317781`;
-    }
-    return handleGPT4Inquiry(from, `Provide troubleshooting steps for the ${model} printer (jams, out-of-paper, error lights).`);
+    return `For paper jams, out-of-paper, alignment issues, red/error-light on ${model} printers:
+https://wa.me/p/6828296190606265/60102317781`;
   }
 
-  // Driver download request
+  // Driver Download requests
   if (DRIVER_DOWNLOAD_REGEX.test(text)) {
     if (!model) {
-      return 'Please tell me your printer model first (e.g. "TSC TTP-247"), then ask for a driver.';
+      return 'Please tell me your printer model first before asking for a driver.';
     }
     if (/tsc/i.test(model)) {
       return 'Download TSC drivers here: https://wa.me/p/7261706730612270/60102317781';
@@ -109,7 +135,6 @@ https://wa.me/p/8073532716014276/60102317781`;
   return 'Please tell me your printer model or Printing Software first (e.g. "TSC TTP-247" or "Seagull Bartender")';
 }
 
-// GPT-4 fallback
 async function handleGPT4Inquiry(from, userText) {
   const model = getUserModel(from);
   const systemPrompt = model
@@ -125,17 +150,18 @@ async function handleGPT4Inquiry(from, userText) {
   return resp.choices[0].message.content;
 }
 
-// Webhook
+// Webhook endpoint
 app.post('/webhook', async (req, res) => {
-  const msgs = req.body.entry
+  const messages = req.body.entry
     .flatMap(e => e.changes)
     .flatMap(c => c.value.messages || []);
-  for (const msg of msgs) {
+  for (const msg of messages) {
     const reply = await routeIncoming(msg.from, msg.text?.body);
     if (reply) {
       const url = `https://graph.facebook.com/v15.0/${process.env.PHONE_NUMBER_ID}/messages`;
       const token = process.env.WHATSAPP_TOKEN;
-      await axios.post(url,
+      await axios.post(
+        url,
         { messaging_product: 'whatsapp', to: msg.from, text: { body: reply } },
         { headers: { Authorization: `Bearer ${token}` } }
       );
