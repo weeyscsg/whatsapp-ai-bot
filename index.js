@@ -32,20 +32,20 @@ function setUserModel(from, model) {
   });
 }
 
-// Utility to extract a real TSC model code, e.g. "TSC TTP-247"
+// Utility to extract a real TSC or Zebra model code, e.g. "TSC TTP-247"
 function extractPrinterModel(message) {
   if (!message || typeof message !== 'string') return null;
-  const match = message.match(/tsc\s*[\w-]*\d+/i);
+  const match = message.match(/(?:tsc|zebra)\s*[\w-]*\d+/i);
   return match ? match[0] : null;
 }
 
 // Define intent handlers
 const commandHandlers = [
-  { pattern: /\b(hi|hello)\b/i, handler: handleGreeting },
-  { pattern: /\b(driver|download driver)\b/i, handler: handleDriverDownload },
+  { pattern: /(hi|hello)/i, handler: handleGreeting },
+  { pattern: /(driver|download driver)/i, handler: handleDriverDownload },
   {
-    // TSC labeling software
-    pattern: /(?:tsc.*software|label(?:ing)?.*software|software.*tsc|software.*label(?:ing)?)/i,
+    // TSC labeling software or Zebra software
+    pattern: /(?:tsc.*software|label(?:ing)?.*software|software.*tsc|software.*label(?:ing)?|zebra.*software|software.*zebra)/i,
     handler: handleSoftwareLink
   },
   {
@@ -54,14 +54,14 @@ const commandHandlers = [
     handler: handleWindowsDriverLink
   },
   {
-    // Matches driver configuration, speed, darkness, density, dpi, resolution,
+    // Driver configuration, speed, darkness, density, dpi, resolution,
     // driver properties, printer preferences, advanced settings, calibration, etc.
     pattern: /(?:tsc.*driver.*config(?:uration)?|driver.*config(?:uration)?|configure.*driver|advanced? settings|driver properties|printer preferences|preferences|adjust.*(?:speed|darkness|density|dpi|resolution)|(?:lighter|darker|light|dark).*(?:print|printout)|fade(?:d)?|fading|calibrat(?:e|ion)|print faint|quality settings)/i,
     handler: handleDriverConfig
   },
   {
     // Printer model codes only
-    pattern: /\btsc\s*[\w-]*\d+\b/i,
+    pattern: /(tsc|zebra)\s*[\w-]*\d+/i,
     handler: async (from, text) => {
       const model = extractPrinterModel(text);
       setUserModel(from, model);
@@ -73,8 +73,8 @@ const commandHandlers = [
 // Main routing: enforce model-first then dispatch
 async function routeIncoming(from, text) {
   const storedModel = getUserModel(from);
-  if (!storedModel && !/\btsc\s*[\w-]*\d+\b/i.test(text)) {
-    return 'Please tell me your printer model first (e.g. "TSC TTP-247"), so I can assist you properly.';
+  if (!storedModel && !/(?:tsc|zebra)\s*[\w-]*\d+/i.test(text)) {
+    return 'Please tell me your printer model first (e.g. "TSC TTP-247" or "Zebra GK420d"), so I can assist you properly.';
   }
   for (const { pattern, handler } of commandHandlers) {
     if (pattern.test(text)) {
@@ -132,19 +132,47 @@ async function handleGreeting(from, text) {
 }
 
 async function handleDriverDownload(from, text) {
-  return 'Download TSC drivers here: https://wa.me/p/7261706730612270/60102317781';
+  const model = getUserModel(from) || '';
+  if (/tsc/i.test(model)) {
+    return 'Download TSC drivers here: https://wa.me/p/7261706730612270/60102317781';
+  }
+  if (/zebra/i.test(model)) {
+    return 'Download Zebra drivers here: https://www.zebra.com/us/en/support-downloads/drivers.html';
+  }
+  return 'Here is a generic driver download page: https://www.tscprinters.com/DriverDownload';
 }
 
 async function handleSoftwareLink(from, text) {
-  return "Here's the TSC Labeling Software link: https://wa.me/p/25438061125807295/60102317781";
+  const model = getUserModel(from) || '';
+  if (/tsc/i.test(model)) {
+    return "Here's the TSC Labeling Software link: https://wa.me/p/25438061125807295/60102317781";
+  }
+  if (/zebra/i.test(model)) {
+    return 'Here is the Zebra Labeling Software page: https://www.zebra.com/us/en/support-downloads/software.html';
+  }
+  return 'Please confirm your printer brand so I can send the correct software link.';
 }
 
 async function handleWindowsDriverLink(from, text) {
-  return "Here's the TSC Windows/installation driver link: https://wa.me/p/7261706730612270/60102317781";
+  const model = getUserModel(from) || '';
+  if (/tsc/i.test(model)) {
+    return "Here's the TSC Windows/installation driver link: https://wa.me/p/7261706730612270/60102317781";
+  }
+  if (/zebra/i.test(model)) {
+    return 'Here is the Zebra Windows driver download: https://www.zebra.com/us/en/support-downloads/drivers.html';
+  }
+  return 'Please confirm your printer brand so I can send the correct Windows driver link.';
 }
 
 async function handleDriverConfig(from, text) {
-  return 'For printer driver configuration (speed, darkness, print quality), check this tutorial: https://wa.me/p/8073532716014276/60102317781';
+  const model = getUserModel(from) || '';
+  if (/tsc/i.test(model)) {
+    return 'For TSC printer driver configuration (speed, darkness, print quality), check this tutorial: https://wa.me/p/8073532716014276/60102317781';
+  }
+  if (/zebra/i.test(model)) {
+    return 'For Zebra printer driver configuration, see this guide: https://www.zebra.com/us/en/support-downloads/knowledge-articles.html';
+  }
+  return 'Please confirm your printer brand for the correct configuration guide.';
 }
 
 async function handleGPT4Inquiry(from, text) {
