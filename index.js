@@ -39,7 +39,7 @@ const commandHandlers = [
   { pattern: /\b(driver|download driver)\b/i, handler: handleDriverDownload },
   { pattern: /(?:software|download.*software)/i, handler: handleSoftwareLink },
   { pattern: /(?:windows?.*driver|install(?:ation)?.*driver)/i, handler: handleWindowsDriverLink },
-  { pattern: /(?:driver.*config|configure.*driver|advanced? settings|adjust.*(?:speed|darkness|dpi|resolution)|fade(?:d)?|fading)/i, handler: handleDriverConfig },
+  { pattern: /(?:driver.*config|configure.*driver|advanced? settings|adjust.*(?:speed|darkness|dpi|resolution)|fade(?:d)?|fading|calibrat(?:e|ion))/i, handler: handleDriverConfig },
   { pattern: /\b(?:tsc|zebra)\s*[\w-]*\d+\b/i,
     handler: async (from, text) => {
       const model = extractPrinterModel(text);
@@ -66,7 +66,7 @@ async function routeIncoming(from, text) {
 
 // Generate reply
 async function generateReply({ from, body, audio }) {
-  let message = (body||'').trim();
+  let message = (body || '').trim();
   if (audio) {
     try {
       const { transcribeAudio } = await import('node-whisper');
@@ -90,7 +90,7 @@ app.post('/webhook', async (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Bot running on port ${PORT}`));
 
-// — Handlers —
+// --- Handlers ---
 
 async function handleGreeting() {
   return 'Hello! How can I assist you today?';
@@ -101,21 +101,16 @@ async function handleDriverDownload(from) {
   if (/tsc/i.test(model)) {
     return 'Download TSC drivers here: https://wa.me/p/7261706730612270/60102317781';
   }
-  if (/zebra/i.test(model)) {
-    return handleGPT4Inquiry(from, `Find the official download URL for the Zebra ${model} printer driver.`);
-  }
-  return handleGPT4Inquiry(from, `Where can I download the official printer driver for ${model||'my printer'}?`);
+  return handleGPT4Inquiry(from, `Please find the official download URL for the ${model} printer driver.`);
 }
 
 async function handleSoftwareLink(from) {
   const model = getUserModel(from) || '';
   if (/tsc/i.test(model)) {
-    return "Here's your TSC Bartender software link:\nhttps://wa.me/p/25438061125807295/60102317781";
+    return "Here's your TSC Bartender software link:
+https://wa.me/p/25438061125807295/60102317781";
   }
-  if (/zebra/i.test(model)) {
-    return handleGPT4Inquiry(from, `Find the official download URL for the Zebra ${model} labeling software.`);
-  }
-  return handleGPT4Inquiry(from, `Where can I download the official labeling software for ${model||'my printer'}?`);
+  return handleGPT4Inquiry(from, `Please find the official download URL for the ${model} labeling software.`);
 }
 
 async function handleWindowsDriverLink(from) {
@@ -123,28 +118,29 @@ async function handleWindowsDriverLink(from) {
   if (/tsc/i.test(model)) {
     return "Here's the TSC Windows driver link: https://wa.me/p/7261706730612270/60102317781";
   }
-  if (/zebra/i.test(model)) {
-    return handleGPT4Inquiry(from, `Find the official Windows driver download URL for the Zebra ${model}.`);
-  }
-  return handleGPT4Inquiry(from, `Where can I find the official Windows driver for ${model||'my printer'}?`);
+  return handleGPT4Inquiry(from, `Please find the official Windows driver download URL for the ${model}.`);
 }
 
 async function handleDriverConfig(from) {
   const model = getUserModel(from) || '';
   if (/tsc/i.test(model)) {
-    return 'For TSC driver configuration (speed, darkness, quality), see: https://wa.me/p/8073532716014276/60102317781';
+    // Hardcoded TE200 calibration link
+    return 'To calibrate your TSC TE200, see: https://wa.me/p/8073532716014276/60102317781';
   }
-  if (/zebra/i.test(model)) {
-    return handleGPT4Inquiry(from, `Guide me to the official Zebra ${model} driver settings configuration instructions.`);
-  }
-  return handleGPT4Inquiry(from, `How do I configure driver settings for ${model||'my printer'}?`);
+  return handleGPT4Inquiry(from, `Please provide configuration & calibration steps for the ${model} printer.`);
 }
 
-async function handleGPT4Inquiry(from, text) {
-  // Correctly handle the response object
+async function handleGPT4Inquiry(from, userText) {
+  const model = getUserModel(from);
+  const systemPrompt = model
+    ? `You are a printer support assistant. The user’s printer model is ${model}.`
+    : 'You are a printer support assistant.';
   const completion = await openai.chat.completions.create({
     model: 'gpt-4-turbo',
-    messages: [{ role: 'user', content: text }],
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userText }
+    ],
   });
   return completion.choices[0].message.content;
 }
