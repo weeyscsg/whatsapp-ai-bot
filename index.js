@@ -114,11 +114,11 @@ async function handleDriverDownload(from, text) {
 }
 
 async function handleSoftwareLink(from, text) {
-  return 'Here's the TSC Labeling Software link: https://wa.me/p/25438061125807295/60102317781';
+  return "Here's the TSC Labeling Software link: https://wa.me/p/25438061125807295/60102317781";
 }
 
 async function handleWindowsDriverLink(from, text) {
-  return 'Here's the TSC Windows/installation driver link: https://wa.me/p/7261706730612270/60102317781';
+  return "Here's the TSC Windows/installation driver link: https://wa.me/p/7261706730612270/60102317781";
 }
 
 async function handleDriverConfig(from, text) {
