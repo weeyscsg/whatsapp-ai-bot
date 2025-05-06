@@ -10,7 +10,7 @@ app.use(bodyParser.json());
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// In-memory stores
+// In-memory store for user printer models and software
 const userModels = new Map();
 const userSoftwares = new Map();
 
@@ -24,7 +24,7 @@ function getUserModel(from) {
 }
 
 function setUserModel(from, model) {
-  userModels.set(from, { model, expires: Date.now() + 48 * 3600 * 1000 });
+  userModels.set(from, { model, expires: Date.now() + 48*3600*1000 });
 }
 
 function getUserSoftware(from) {
@@ -37,17 +37,17 @@ function getUserSoftware(from) {
 }
 
 function setUserSoftware(from, software) {
-  userSoftwares.set(from, { software, expires: Date.now() + 48 * 3600 * 1000 });
+  userSoftwares.set(from, { software, expires: Date.now() + 48*3600*1000 });
 }
 
-// Regexes
+// Regex patterns
 const MODEL_REGEX = /\b(?:tsc|zebra)[\s\w-]*\d+\w*\b/i;
-const SOFTWARE_NAME_REGEX = /\b(?:Seagull\s+Bartender|Label\s*Matrix|Teklyn\s+Label\s*Matrix)\b/i;
-const CONFIG_REGEX = /(?:blur|light(?:\b|ing)|fade(?:d)?|speed\s*(?:slow|fast)|darkness|dpi|resolution)/i;
+const SOFTWARE_NAME_REGEX = /\b(?:Seagull\s*Bartender|Label\s*Matrix|Teklyn)\b/i;
+const CONFIG_REGEX = /(?:blur|light(?:ing)?|fade(?:d)?|speed\s*(?:slow|fast)|darkness|dpi|resolution)/i;
 const ERROR_REGEX = /(?:error\s*light|blinking|paper\s*jam|out\s*of\s*paper|no\s*paper|alignment|label\s*no\s*feed)/i;
-const DRIVER_DOWNLOAD_REGEX = /\b(?:driver|printer driver|download driver)\b/i;
+const DRIVER_REGEX = /\b(?:driver|printer driver|download driver)\b/i;
 
-// Extractors
+// Extract functions
 function extractPrinterModel(text) {
   const m = text.match(MODEL_REGEX);
   return m ? m[0] : null;
@@ -59,69 +59,56 @@ function extractSoftwareName(text) {
 
 // Main router
 async function routeIncoming(from, text) {
-  text = (text || '').trim();
+  text = (text||'').trim();
   const model = getUserModel(from);
-  const softwareSaved = getUserSoftware(from);
+  const software = getUserSoftware(from);
 
-  // Greeting
+  // 1) Greeting
   if (/^(hi|hello)$/i.test(text)) {
     return 'Please tell me your printer model or Printing Software first (e.g. "TSC TTP-247" or "Seagull Bartender")';
   }
 
-  // Printer Model Entry
+  // 2) Printer Model entry
   const detectedModel = extractPrinterModel(text);
   if (detectedModel) {
     setUserModel(from, detectedModel);
     return `Got it! I'll remember your printer model: ${detectedModel}`;
   }
 
-  // Software Entry
+  // 3) Software entry
   const detectedSoftware = extractSoftwareName(text);
   if (detectedSoftware) {
     setUserSoftware(from, detectedSoftware);
     return `Got it! I'll remember your printing software: ${detectedSoftware}`;
   }
 
-  // Printing Software request
-  if (/software|printing software/i.test(text)) {
-    if (!model && !softwareSaved) {
-      return 'Please tell me your printer model or printing software first.';
-    }
-    // If TSC printer model saved
-    if (model && /tsc/i.test(model)) {
-      return `Here's your TSC Bartender software link:
-https://wa.me/p/25438061125807295/60102317781`;
-    }
-    // If softwareSaved directly
-    if (softwareSaved && /bartender|label matrix|teklyn/i.test(softwareSaved)) {
-      return `Here's your ${softwareSaved} download link:
-https://wa.me/p/25438061125807295/60102317781`;
-    }
-    return handleGPT4Inquiry(from, softwareSaved
-      ? `Find download URL for ${softwareSaved}.`
-      : `Find download URL for the Zebra ${model} labeling software.`);
-  }
-
-  // Driver configuration queries
+  // 4) Driver configuration keywords
   if (CONFIG_REGEX.test(text)) {
     if (!model) {
-      return 'Please tell me your printer model first before configuration queries.';
+      return 'Please tell me your printer model first (e.g. "TSC TTP-247") before configuration queries.';
     }
-    return `For printer driver configuration (speed, darkness, print quality) for your ${model}, see:
+    if (/tsc/i.test(model)) {
+      return `For printer driver configuration (speed, darkness, print quality) for your ${model}, see:
 https://wa.me/p/8073532716014276/60102317781`;
+    }
+    // fallback to GPT
+    return handleGPT4Inquiry(from, `Provide driver configuration steps for the ${model} printer.`);
   }
 
-  // Error/jam queries
+  // 5) Error/jam keywords
   if (ERROR_REGEX.test(text)) {
     if (!model) {
-      return 'Please tell me your printer model first before troubleshooting.';
+      return 'Please tell me your printer model first (e.g. "TSC TTP-247") before troubleshooting.';
     }
-    return `For paper jams, out-of-paper, alignment issues, red/error-light on ${model} printers:
+    if (/tsc/i.test(model)) {
+      return `For paper jams, out-of-paper, alignment issues, or error-light on your ${model}, see:
 https://wa.me/p/6828296190606265/60102317781`;
+    }
+    return handleGPT4Inquiry(from, `Provide troubleshooting steps for the ${model} printer (jams, error lights).`);
   }
 
-  // Driver Download requests
-  if (DRIVER_DOWNLOAD_REGEX.test(text)) {
+  // 6) Driver download request
+  if (DRIVER_REGEX.test(text)) {
     if (!model) {
       return 'Please tell me your printer model first before asking for a driver.';
     }
@@ -131,45 +118,49 @@ https://wa.me/p/6828296190606265/60102317781`;
     return handleGPT4Inquiry(from, `Find the official download URL for the ${model} printer driver.`);
   }
 
-  // Fallback
+  // 7) Software follow-up (handled by GPT4 with software context)
+  if (software) {
+    return handleGPT4Inquiry(from, text);
+  }
+
+  // 8) Fallback
   return 'Please tell me your printer model or Printing Software first (e.g. "TSC TTP-247" or "Seagull Bartender")';
 }
 
+// GPT-4 helper
 async function handleGPT4Inquiry(from, userText) {
   const model = getUserModel(from);
-  const systemPrompt = model
-    ? `You are a printer support assistant. The user’s printer model is ${model}.`
-    : 'You are a printer support assistant.';
+  const software = getUserSoftware(from);
+  const systemLines = ['You are a printer support assistant.'];
+  if (model) systemLines.push(`Printer model: ${model}.`);
+  if (software) systemLines.push(`Printing software: ${software}.`);
   const resp = await openai.chat.completions.create({
     model: 'gpt-4-turbo',
     messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userText }
-    ],
+      { role:'system', content: systemLines.join(' ') },
+      { role:'user', content: userText }
+    ]
   });
   return resp.choices[0].message.content;
 }
 
-// Webhook endpoint
+// Webhook
 app.post('/webhook', async (req, res) => {
-  const messages = req.body.entry
-    .flatMap(e => e.changes)
-    .flatMap(c => c.value.messages || []);
-  for (const msg of messages) {
-    const reply = await routeIncoming(msg.from, msg.text?.body);
+  const msgs = req.body.entry
+    .flatMap(e=>e.changes)
+    .flatMap(c=>c.value.messages||[]);
+  for (const m of msgs) {
+    const reply = await routeIncoming(m.from, m.text?.body);
     if (reply) {
-      const url = `https://graph.facebook.com/v15.0/${process.env.PHONE_NUMBER_ID}/messages`;
-      const token = process.env.WHATSAPP_TOKEN;
       await axios.post(
-        url,
-        { messaging_product: 'whatsapp', to: msg.from, text: { body: reply } },
-        { headers: { Authorization: `Bearer ${token}` } }
+        `https://graph.facebook.com/v15.0/${process.env.PHONE_NUMBER_ID}/messages`,
+        { messaging_product:'whatsapp', to:m.from, text:{ body:reply } },
+        { headers:{ Authorization:\`Bearer ${process.env.WHATSAPP_TOKEN}\` } }
       );
     }
   }
   res.sendStatus(200);
 });
 
-// Start server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Bot running on port ${PORT}`));
+const PORT = process.env.PORT||3000;
+app.listen(PORT, ()=>console.log(\`Bot running on port \${PORT}\`));
