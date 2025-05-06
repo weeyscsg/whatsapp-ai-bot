@@ -15,37 +15,66 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// ── COMMAND HANDLERS ────────────────────────────────────────────────────────
+// In-memory store for user printer models with 48h expiry
+const userModels = new Map();
+function getUserModel(from) {
+  const entry = userModels.get(from);
+  if (!entry || Date.now() > entry.expires) {
+    userModels.delete(from);
+    return null;
+  }
+  return entry.model;
+}
+function setUserModel(from, model) {
+  userModels.set(from, {
+    model,
+    expires: Date.now() + 48 * 3600 * 1000
+  });
+}
+
+// Utility to extract a real TSC model code, e.g. "TSC TTP-247"
+function extractPrinterModel(message) {
+  if (!message || typeof message !== 'string') return null;
+  const match = message.match(/tsc\s*[\w-]*\d+/i);
+  return match ? match[0] : null;
+}
+
+// Define intent handlers
 const commandHandlers = [
   { pattern: /\b(hi|hello)\b/i, handler: handleGreeting },
   { pattern: /\b(driver|download driver)\b/i, handler: handleDriverDownload },
   {
-    // Matches queries about TSC software or labeling software
+    // TSC labeling software
     pattern: /(?:tsc.*software|label(?:ing)?.*software|software.*tsc|software.*label(?:ing)?)/i,
     handler: handleSoftwareLink
   },
   {
-    // Matches TSC Windows driver or installation driver queries
+    // Windows or installation driver
     pattern: /(?:tsc.*(?:windows?|win)\s*driver|windows?\s*driver|install(?:ation)?\s*driver|driver\s*install(?:ation)?)/i,
     handler: handleWindowsDriverLink
   },
   {
-    // Matches driver configuration, speed, darkness, print lighter/darker, fading, etc.
+    // Driver config: speed, darkness, print quality, etc.
     pattern: /(?:tsc.*driver.*config(?:uration)?|driver.*config(?:uration)?|configure.*driver|driver settings|adjust.*(?:speed|darkness)|(?:lighter|darker|light|dark).*(?:print|printout)|fading|print faint)/i,
     handler: handleDriverConfig
   },
-  { pattern: /\b(model)\b/i, handler: handlePrinterModelMemory },
+  {
+    // Printer model codes only
+    pattern: /\btsc\s*[\w-]*\d+\b/i,
+    handler: async (from, text) => {
+      const model = extractPrinterModel(text);
+      setUserModel(from, model);
+      return `Got it! I'll remember your printer model: ${model}`;
+    }
+  },
 ];
 
-// ── UTILITIES ───────────────────────────────────────────────────────────────
-function extractPrinterModel(message) {
-  if (!message || typeof message !== 'string') return null;
-  const match = message.match(/tsc\s*(\w+\d+)/i);
-  return match ? match[1] : null;
-}
-
-// ── ROUTING / DISPATCH ────────────────────────────────────────────────────────
+// Main routing: enforce model-first then dispatch
 async function routeIncoming(from, text) {
+  const storedModel = getUserModel(from);
+  if (!storedModel && !/\btsc\s*[\w-]*\d+\b/i.test(text)) {
+    return 'Please tell me your printer model first (e.g. "TSC TTP-247"), so I can assist you properly.';
+  }
   for (const { pattern, handler } of commandHandlers) {
     if (pattern.test(text)) {
       return handler(from, text);
@@ -54,10 +83,9 @@ async function routeIncoming(from, text) {
   return handleGPT4Inquiry(from, text);
 }
 
-// ── MAIN REPLY GENERATOR ────────────────────────────────────────────────────
+// Generate reply: optionally transcribe audio, then dispatch
 async function generateReply({ from, body, audio }) {
   let message = body || '';
-
   if (audio) {
     try {
       const { transcribeAudio } = await import('node-whisper');
@@ -66,16 +94,10 @@ async function generateReply({ from, body, audio }) {
       console.warn('Whisper transcription failed:', err);
     }
   }
-
-  const model = extractPrinterModel(message);
-  if (model) {
-    await handlePrinterModelMemory(from, model);
-  }
-
   return routeIncoming(from, message);
 }
 
-// ── WEBHOOK HANDLER ─────────────────────────────────────────────────────────
+// Webhook entrypoint
 app.post('/webhook', async (req, res) => {
   const messages = req.body.entry
     .flatMap(e => e.changes)
@@ -85,7 +107,6 @@ app.post('/webhook', async (req, res) => {
     const from = msg.from;
     const body = msg.text?.body || '';
     const audio = msg.audio?.id;
-
     try {
       const reply = await generateReply({ from, body, audio });
       if (typeof reply === 'string' && reply) {
@@ -96,15 +117,15 @@ app.post('/webhook', async (req, res) => {
       await sendText(from, 'Oops, something went wrong.');
     }
   }
-
   res.sendStatus(200);
 });
 
-// ── START SERVER ───────────────────────────────────────────────────────────
+// Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Bot running on port ${PORT}`));
 
-// ── HANDLER FUNCTIONS ───────────────────────────────────────────────────────
+// --- Handlers ---
+
 async function handleGreeting(from, text) {
   return 'Hello! How can I assist you today?';
 }
@@ -125,11 +146,6 @@ async function handleDriverConfig(from, text) {
   return 'For printer driver configuration (speed, darkness, print quality), check this tutorial: https://wa.me/p/8073532716014276/60102317781';
 }
 
-async function handlePrinterModelMemory(from, model) {
-  // TODO: store per-user printer model memory with 48h expiry
-  return `Got it! Remembering your printer model: ${model}`;
-}
-
 async function handleGPT4Inquiry(from, text) {
   const completion = await openai.chat.completions.create({
     model: 'gpt-4-turbo',
@@ -138,7 +154,8 @@ async function handleGPT4Inquiry(from, text) {
   return completion.choices[0].message.content;
 }
 
-// ── WHATSAPP SENDER ─────────────────────────────────────────────────────────
+// --- WhatsApp sender ---
+
 async function sendText(to, msg) {
   try {
     const url = `https://graph.facebook.com/v15.0/${process.env.PHONE_NUMBER_ID}/messages`;
