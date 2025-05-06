@@ -40,11 +40,12 @@ const commandHandlers = [
   { pattern: /(?:software|download.*software)/i, handler: handleSoftwareLink },
   { pattern: /(?:windows?.*driver|install(?:ation)?.*driver)/i, handler: handleWindowsDriverLink },
   {
-    // Matches configuration, calibration, jams, out-of-paper, etc.
-    pattern: /(?:driver.*config|configure.*driver|advanced? settings|adjust.*(?:speed|darkness|dpi|resolution)|fade(?:d)?|fading|calibrat(?:e|ion)|paper\s*jam|jam\b|out\s*of\s*paper|no\s*paper|print faint|quality settings)/i,
+    // Matches configuration, calibration, jams, out-of-paper, red light/blinking, etc.
+    pattern: /(?:driver.*config|configure.*driver|advanced? settings|adjust.*(?:speed|darkness|dpi|resolution)|fade(?:d)?|fading|calibrat(?:e|ion)|paper\s*jam|jam\b|out\s*of\s*paper|no\s*paper|print faint|quality settings|red\s*light(?:\s*blinking)?)/i,
     handler: handleDriverConfig
   },
-  { pattern: /\b(?:tsc|zebra)\s*[\w-]*\d+\b/i,
+  {
+    pattern: /\b(?:tsc|zebra)\s*[\w-]*\d+\b/i,
     handler: async (from, text) => {
       const model = extractPrinterModel(text);
       setUserModel(from, model);
@@ -127,12 +128,12 @@ async function handleWindowsDriverLink(from) {
 async function handleDriverConfig(from, text) {
   const model = getUserModel(from) || '';
   if (/tsc/i.test(model)) {
-    // For calibration, jams, or out-of-paper issues, use the new tutorial link
-    if (/calibrat|paper\s*jam|jam\b|out\s*of\s*paper|no\s*paper/i.test(text)) {
-      return 'For calibration, paper jams, out-of-paper, and related issues on your TSC printer, please see: https://wa.me/p/6828296190606265/60102317781';
+    // For calibration, jams, out-of-paper, red light issues
+    if (/(?:calibrat(?:e|ion)|paper\s*jam|jam\b|out\s*of\s*paper|no\s*paper|red\s*light(?:\s*blinking)?)/i.test(text)) {
+      return 'For calibration, paper jams, out-of-paper, and red light issues on your TSC printer, please see: https://wa.me/p/6828296190606265/60102317781';
     }
     // Otherwise default to driver config tutorial
-    return 'For TSC printer driver configuration (speed, darkness, print quality), check this tutorial: https://wa.me/p/8073532716014276/60102317781';
+    return 'For general TSC printer driver configuration (speed, darkness, print quality), check this tutorial: https://wa.me/p/8073532716014276/60102317781';
   }
   return handleGPT4Inquiry(from, `Please provide configuration & calibration steps for the ${model} printer.`);
 }
