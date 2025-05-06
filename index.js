@@ -4,47 +4,44 @@ import dotenv from 'dotenv';
 import axios from 'axios';
 import OpenAI from 'openai';
 
+// Load environment variables
 dotenv.config();
+
 const app = express();
 app.use(bodyParser.json());
 
+// Initialize OpenAI client
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// In-memory 48h model store
+// In-memory store for user printer models
 const userModels = new Map();
 function getUserModel(from) {
-  const e = userModels.get(from);
-  if (!e || Date.now()>e.expires) return userModels.delete(from), null;
-  return e.model;
+  const entry = userModels.get(from);
+  if (!entry || Date.now() > entry.expires) {
+    userModels.delete(from);
+    return null;
+  }
+  return entry.model;
 }
-function setUserModel(from, m) {
-  userModels.set(from, { model: m, expires: Date.now()+48*3600*1000 });
-}
-
-// Extract only real TSC/Zebra model strings
-function extractPrinterModel(msg) {
-  const m = msg.match(/\b(?:tsc|zebra)\s*[\w-]*\d+\b/i);
-  return m ? m[0] : null;
+function setUserModel(from, model) {
+  userModels.set(from, { model, expires: Date.now() + 48 * 3600 * 1000 });
 }
 
+// Extract TSC or Zebra model codes
+function extractPrinterModel(message) {
+  const match = message.match(/\b(?:tsc|zebra)\s*[\w-]*\d+\b/i);
+  return match ? match[0] : null;
+}
+
+// Handlers mapping
 const commandHandlers = [
   { pattern: /\b(hi|hello)\b/i, handler: handleGreeting },
   { pattern: /\b(driver|download driver)\b/i, handler: handleDriverDownload },
-  {
-    pattern: /(?:software|download.*software)/i,
-    handler: handleSoftwareLink
-  },
-  {
-    pattern: /(?:windows?.*driver|install(?:ation)?.*driver)/i,
-    handler: handleWindowsDriverLink
-  },
-  {
-    pattern: /(?:driver.*config|configure.*driver|advanced? settings|adjust.*(?:speed|darkness|dpi|resolution)|fade(?:d)?|fading)/i,
-    handler: handleDriverConfig
-  },
-  {
-    pattern: /\b(?:tsc|zebra)\s*[\w-]*\d+\b/i,
-    handler: async (from,text) => {
+  { pattern: /(?:software|download.*software)/i, handler: handleSoftwareLink },
+  { pattern: /(?:windows?.*driver|install(?:ation)?.*driver)/i, handler: handleWindowsDriverLink },
+  { pattern: /(?:driver.*config|configure.*driver|advanced? settings|adjust.*(?:speed|darkness|dpi|resolution)|fade(?:d)?|fading)/i, handler: handleDriverConfig },
+  { pattern: /\b(?:tsc|zebra)\s*[\w-]*\d+\b/i,
+    handler: async (from, text) => {
       const model = extractPrinterModel(text);
       setUserModel(from, model);
       return `Got it! I'll remember your printer model: ${model}`;
@@ -52,87 +49,114 @@ const commandHandlers = [
   },
 ];
 
+// Main routing
 async function routeIncoming(from, text) {
   const stored = getUserModel(from);
   const found = extractPrinterModel(text);
   if (!stored && !found) {
-    return 'Please tell me your printer model first (e.g. "TSC TTP-247" or "Zebra GK420d")…';
+    return 'Please tell me your printer model first (e.g. "TSC TTP-247" or "Zebra GK420d"), so I can assist you properly.';
   }
-  for (let {pattern,handler} of commandHandlers) {
-    if (pattern.test(text)) return handler(from,text);
+  for (const { pattern, handler } of commandHandlers) {
+    if (pattern.test(text)) {
+      return handler(from, text);
+    }
   }
-  return handleGPT4Inquiry(from,text);
+  return handleGPT4Inquiry(from, text);
 }
 
-async function generateReply({from,body,audio}) {
-  let msg = (body||'').trim();
+// Generate reply
+async function generateReply({ from, body, audio }) {
+  let message = (body||'').trim();
   if (audio) {
-    try { msg = await (await import('node-whisper')).transcribeAudio(audio); }
-    catch{}  
+    try {
+      const { transcribeAudio } = await import('node-whisper');
+      message = await transcribeAudio(audio);
+    } catch {}
   }
-  return routeIncoming(from,msg);
+  return routeIncoming(from, message);
 }
 
-app.post('/webhook', async (req,res) => {
-  const msgs = req.body.entry.flatMap(e=>e.changes).flatMap(c=>c.value.messages||[]);
-  for (let m of msgs) {
-    const reply = await generateReply({ from:m.from, body:m.text?.body, audio:m.audio?.id });
-    if (reply) await sendText(m.from,reply);
+// Webhook endpoint
+app.post('/webhook', async (req, res) => {
+  const messages = req.body.entry.flatMap(e => e.changes).flatMap(c => c.value.messages || []);
+  for (const msg of messages) {
+    const reply = await generateReply({ from: msg.from, body: msg.text?.body, audio: msg.audio?.id });
+    if (reply) await sendText(msg.from, reply);
   }
   res.sendStatus(200);
 });
 
-app.listen(process.env.PORT||3000,()=>console.log('Bot up'));
+// Start server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Bot running on port ${PORT}`));
 
-// ── HANDLERS ─────────────────────────────────────────────
-async function handleGreeting(){ return 'Hello! How can I assist you today?'; }
+// — Handlers —
 
-async function handleDriverDownload(from){
-  const model = getUserModel(from)||'';
-  if (/tsc/i.test(model)) return 'Download TSC drivers here: https://wa.me/p/7261706730612270/60102317781';
-  if (/zebra/i.test(model)) return 'Download Zebra drivers here: https://www.zebra.com/us/en/support-downloads/drivers.html';
-  return 'Here is a generic driver download page: https://wa.me/p/7261706730612270/60102317781';
+async function handleGreeting() {
+  return 'Hello! How can I assist you today?';
 }
 
-async function handleSoftwareLink(from){
-  const model = getUserModel(from)||'';
+async function handleDriverDownload(from) {
+  const model = getUserModel(from) || '';
+  if (/tsc/i.test(model)) {
+    return 'Download TSC drivers here: https://wa.me/p/7261706730612270/60102317781';
+  }
+  if (/zebra/i.test(model)) {
+    return handleGPT4Inquiry(from, `Find the official download URL for the Zebra ${model} printer driver.`);
+  }
+  return handleGPT4Inquiry(from, `Where can I download the official printer driver for ${model||'my printer'}?`);
+}
+
+async function handleSoftwareLink(from) {
+  const model = getUserModel(from) || '';
   if (/tsc/i.test(model)) {
     return "Here's your TSC Bartender software link:\nhttps://wa.me/p/25438061125807295/60102317781";
   }
   if (/zebra/i.test(model)) {
-    return 'Here is the Zebra Labeling Software page: https://www.zebra.com/us/en/support-downloads/software.html';
+    return handleGPT4Inquiry(from, `Find the official download URL for the Zebra ${model} labeling software.`);
   }
-  return 'Please confirm your printer brand so I can send the correct software link.';
+  return handleGPT4Inquiry(from, `Where can I download the official labeling software for ${model||'my printer'}?`);
 }
 
-async function handleWindowsDriverLink(from){
-  const model = getUserModel(from)||'';
-  if (/tsc/i.test(model)) return "Here's the TSC Windows driver link: https://wa.me/p/7261706730612270/60102317781";
-  if (/zebra/i.test(model)) return 'Here is the Zebra Windows driver: https://www.zebra.com/us/en/support-downloads/drivers.html';
-  return 'Please confirm your printer brand so I can send the correct Windows driver link.';
+async function handleWindowsDriverLink(from) {
+  const model = getUserModel(from) || '';
+  if (/tsc/i.test(model)) {
+    return "Here's the TSC Windows driver link: https://wa.me/p/7261706730612270/60102317781";
+  }
+  if (/zebra/i.test(model)) {
+    return handleGPT4Inquiry(from, `Find the official Windows driver download URL for the Zebra ${model}.`);
+  }
+  return handleGPT4Inquiry(from, `Where can I find the official Windows driver for ${model||'my printer'}?`);
 }
 
-async function handleDriverConfig(from){
-  const model = getUserModel(from)||'';
-  if (/tsc/i.test(model)) return 'For TSC driver config (speed/darkness), see: https://wa.me/p/8073532716014276/60102317781';
-  if (/zebra/i.test(model)) return 'For Zebra driver config, see: https://www.zebra.com/us/en/support-downloads/knowledge-articles.html';
-  return 'Please confirm your printer brand for the right configuration guide.';
+async function handleDriverConfig(from) {
+  const model = getUserModel(from) || '';
+  if (/tsc/i.test(model)) {
+    return 'For TSC driver configuration (speed, darkness, print quality), see: https://wa.me/p/8073532716014276/60102317781';
+  }
+  if (/zebra/i.test(model)) {
+    return handleGPT4Inquiry(from, `Guide me to the official Zebra ${model} driver settings configuration instructions.`);
+  }
+  return handleGPT4Inquiry(from, `How do I configure driver settings (speed, darkness, resolution) for ${model||'my printer'}?`);
 }
 
-async function handleGPT4Inquiry(from,text){
-  const r = await openai.chat.completions.create({
-    model:'gpt-4-turbo', messages:[{role:'user',content:text}]
+async function handleGPT4Inquiry(from, text) {
+  const resp = await openai.chat.completions.create({
+    model: 'gpt-4-turbo',
+    messages: [{ role: 'user', content: text }],
   });
-  return r.choices[0].message.content;
+  return resp.data.choices[0].message.content;
 }
 
-// ── SENDER ────────────────────────────────────────────────
-async function sendText(to,msg){
-  try{
+// Send WhatsApp message
+async function sendText(to, msg) {
+  try {
     await axios.post(
       `https://graph.facebook.com/v15.0/${process.env.PHONE_NUMBER_ID}/messages`,
-      { messaging_product:'whatsapp', to, text:{ body:msg } },
-      { headers:{ Authorization:`Bearer ${process.env.WHATSAPP_TOKEN}` } }
+      { messaging_product: 'whatsapp', to, text: { body: msg } },
+      { headers: { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}` } }
     );
-  }catch(e){ console.error('sendText error',e.response?.data||e); }
+  } catch (e) {
+    console.error('sendText error', e.response?.data||e);
+  }
 }
