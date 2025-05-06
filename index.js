@@ -1,6 +1,7 @@
 import express from 'express';
 import bodyParser from 'body-parser';
 import dotenv from 'dotenv';
+import axios from 'axios';
 import OpenAI from 'openai';
 
 // Load environment variables
@@ -9,7 +10,7 @@ dotenv.config();
 const app = express();
 app.use(bodyParser.json());
 
-// Initialize OpenAI client (as ES module with default export)
+// OpenAI client setup
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // ── COMMAND HANDLERS ────────────────────────────────────────────────────────
@@ -58,6 +59,9 @@ async function generateReply({ from, body, audio }) {
 
 // ── WEBHOOK HANDLER ─────────────────────────────────────────────────────────
 app.post('/webhook', async (req, res) => {
+  // Log incoming payload for debugging
+  console.log('Webhook payload:', JSON.stringify(req.body));
+
   const messages = req.body.entry
     .flatMap(e => e.changes)
     .flatMap(c => c.value.messages || []);
@@ -66,6 +70,7 @@ app.post('/webhook', async (req, res) => {
     const from = msg.from;
     const body = msg.text?.body || '';
     const audio = msg.audio?.id;
+
     try {
       const reply = await generateReply({ from, body, audio });
       await sendText(from, reply);
@@ -74,6 +79,7 @@ app.post('/webhook', async (req, res) => {
       await sendText(from, 'Oops, something went wrong.');
     }
   }
+
   res.sendStatus(200);
 });
 
@@ -92,6 +98,7 @@ async function handleLightnessAdvice(from, text) {
   return sendText(from, 'If prints are too light, increase darkness by 1–2 levels in driver settings.');
 }
 async function handlePrinterModelMemory(from, model) {
+  // TODO: store per-user model memory with 48h expiry
   return sendText(from, `Got it! Remembering your printer model: ${model}`);
 }
 async function handleGPT4Inquiry(from, text) {
@@ -99,12 +106,28 @@ async function handleGPT4Inquiry(from, text) {
     model: 'gpt-4-turbo',
     messages: [{ role: 'user', content: text }],
   });
-  return sendText(from, resp.choices[0].message.content);
+  const answer = resp.choices[0].message.content;
+  return sendText(from, answer);
 }
 
 // ── WHATSAPP SENDER ─────────────────────────────────────────────────────────
 async function sendText(to, msg) {
-  // Implement Meta/WhatsApp API call here
+  try {
+    await axios.post(
+      `https://graph.facebook.com/v15.0/${process.env.PHONE_NUMBER_ID}/messages`,
+      {
+        messaging_product: 'whatsapp',
+        to,
+        text: { body: msg }
+      },
+      {
+        headers: { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}` }
+      }
+    );
+    console.log('Sent message to', to, msg);
+  } catch (err) {
+    console.error('Failed to send message:', err.response?.data || err.message);
+  }
 }
 
-// Note: to run as ES module, add "type": "module" to your package.json root. (See warning in logs.)
+// Note: ensure PHONE_NUMBER_ID and WHATSAPP_TOKEN are set in your .env
