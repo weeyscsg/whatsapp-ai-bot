@@ -2,7 +2,7 @@ import express from 'express';
 import bodyParser from 'body-parser';
 import dotenv from 'dotenv';
 import axios from 'axios';
-import { Configuration, OpenAIApi } from 'openai';
+import OpenAI from 'openai';
 
 // Load environment variables
 dotenv.config();
@@ -10,9 +10,10 @@ dotenv.config();
 const app = express();
 app.use(bodyParser.json());
 
-// OpenAI client setup
-const configuration = new Configuration({ apiKey: process.env.OPENAI_API_KEY });
-const openai = new OpenAIApi(configuration);
+// Initialize OpenAI client with default export (v4.x)
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 // ── COMMAND HANDLERS ────────────────────────────────────────────────────────
 const commandHandlers = [
@@ -102,11 +103,12 @@ async function handlePrinterModelMemory(from, model) {
   return sendText(from, `Got it! Remembering your printer model: ${model}`);
 }
 async function handleGPT4Inquiry(from, text) {
-  const resp = await openai.createChatCompletion({
+  // Use new chat.completions API for v4.x
+  const completion = await openai.chat.completions.create({
     model: 'gpt-4-turbo',
     messages: [{ role: 'user', content: text }],
   });
-  return resp.data.choices[0].message.content;
+  return sendText(from, completion.choices[0].message.content);
 }
 
 // ── WHATSAPP SENDER ─────────────────────────────────────────────────────────
