@@ -74,7 +74,6 @@ async function routeIncoming(from, text) {
     setUserSoftware(from);
     if (/tsc/i.test(hasModel)) {
       // Fixed single-line string with 
- for newline
       return "Here's your TSC Bartender software link:\nhttps://wa.me/p/25438061125807295/60102317781";
     }
     return handleGPT4Inquiry(from, `Find the official download URL for the Zebra ${hasModel} labeling software.`);
