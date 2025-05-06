@@ -10,7 +10,7 @@ app.use(bodyParser.json());
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// Memory stores
+// In-memory stores
 const userModels = new Map();
 const userSoftwares = new Map();
 
@@ -40,10 +40,9 @@ function setUserSoftware(from) {
   userSoftwares.set(from, { expires: Date.now() + 48 * 3600 * 1000 });
 }
 
-// Regex for printer models
+// Regex for multi-word TSC/Zebra models
 const MODEL_REGEX = /\b(?:tsc|zebra)[\s\w-]*\d+\w*\b/i;
 
-// Extracts model string
 function extractPrinterModel(text) {
   const m = text.match(MODEL_REGEX);
   return m ? m[0] : null;
@@ -54,29 +53,40 @@ async function routeIncoming(from, text) {
   const hasModel = getUserModel(from);
   const hasSoftware = getUserSoftware(from);
 
-  // Greeting: prompt for model or software
+  // Greeting
   if (/^(hi|hello)$/i.test(text)) {
     return 'Please tell me your printer model or Printing Software first (e.g. "TSC TTP-247" or "Seagull Bartender")';
   }
 
-  // Model entry
+  // Printer model entry
   const model = extractPrinterModel(text);
   if (model) {
     setUserModel(from, model);
     return `Got it! I'll remember your printer model: ${model}`;
   }
 
-  // Software request
+  // Printing software request
   if (/software|printing software/i.test(text)) {
     if (!hasModel) {
       return 'Please tell me your printer model first (e.g. "TSC TTP-247"), then ask for software.';
     }
     setUserSoftware(from);
     if (/tsc/i.test(hasModel)) {
-      // Fixed single-line string with 
-      return "Here's your TSC Bartender software link:\nhttps://wa.me/p/25438061125807295/60102317781";
+      return "Here's your TSC Bartender software link:
+https://wa.me/p/25438061125807295/60102317781";
     }
     return handleGPT4Inquiry(from, `Find the official download URL for the Zebra ${hasModel} labeling software.`);
+  }
+
+  // Printer driver request
+  if (/\b(driver|printer driver|download driver)\b/i.test(text)) {
+    if (!hasModel) {
+      return 'Please tell me your printer model first (e.g. "TSC TTP-247"), then ask for a driver.';
+    }
+    if (/tsc/i.test(hasModel)) {
+      return 'Download TSC drivers here: https://wa.me/p/7261706730612270/60102317781';
+    }
+    return handleGPT4Inquiry(from, `Please find the official download URL for the ${hasModel} printer driver.`);
   }
 
   // Fallback
@@ -99,15 +109,15 @@ async function handleGPT4Inquiry(from, userText) {
 }
 
 app.post('/webhook', async (req, res) => {
-  const msgs = req.body.entry
+  const messages = req.body.entry
     .flatMap(e => e.changes)
     .flatMap(c => c.value.messages || []);
-  for (const m of msgs) {
-    const reply = await routeIncoming(m.from, m.text?.body);
+  for (const msg of messages) {
+    const reply = await routeIncoming(msg.from, msg.text?.body);
     if (reply) {
       await axios.post(
         `https://graph.facebook.com/v15.0/${process.env.PHONE_NUMBER_ID}/messages`,
-        { messaging_product:'whatsapp', to: m.from, text: { body: reply } },
+        { messaging_product: 'whatsapp', to: msg.from, text: { body: reply } },
         { headers: { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}` } }
       );
     }
