@@ -54,8 +54,9 @@ const commandHandlers = [
     handler: handleWindowsDriverLink
   },
   {
-    // Driver config: speed, darkness, print quality, etc.
-    pattern: /(?:tsc.*driver.*config(?:uration)?|driver.*config(?:uration)?|configure.*driver|driver settings|adjust.*(?:speed|darkness)|(?:lighter|darker|light|dark).*(?:print|printout)|fading|print faint)/i,
+    // Matches driver configuration, speed, darkness, density, dpi, resolution,
+    // driver properties, printer preferences, advanced settings, calibration, etc.
+    pattern: /(?:tsc.*driver.*config(?:uration)?|driver.*config(?:uration)?|configure.*driver|advanced? settings|driver properties|printer preferences|preferences|adjust.*(?:speed|darkness|density|dpi|resolution)|(?:lighter|darker|light|dark).*(?:print|printout)|fade(?:d)?|fading|calibrat(?:e|ion)|print faint|quality settings)/i,
     handler: handleDriverConfig
   },
   {
