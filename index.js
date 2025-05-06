@@ -35,14 +35,14 @@ function setUserModel(from, model) {
 // Utility to extract a real TSC or Zebra model code, e.g. "TSC TTP-247"
 function extractPrinterModel(message) {
   if (!message || typeof message !== 'string') return null;
-  const match = message.match(/(?:tsc|zebra)\s*[\w-]*\d+/i);
+  const match = message.match(/\b(?:tsc|zebra)\s*[\w-]*\d+\b/i);
   return match ? match[0] : null;
 }
 
 // Define intent handlers
 const commandHandlers = [
-  { pattern: /(hi|hello)/i, handler: handleGreeting },
-  { pattern: /(driver|download driver)/i, handler: handleDriverDownload },
+  { pattern: /\b(hi|hello)\b/i, handler: handleGreeting },
+  { pattern: /\b(driver|download driver)\b/i, handler: handleDriverDownload },
   {
     // TSC or Zebra labeling software
     pattern: /(?:tsc.*software|label(?:ing)?.*software|software.*(?:tsc|zebra)|zebra.*software|download.*software)/i,
@@ -60,7 +60,7 @@ const commandHandlers = [
   },
   {
     // Printer model codes only
-    pattern: /(?:tsc|zebra)\s*[\w-]*\d+/i,
+    pattern: /\b(?:tsc|zebra)\s*[\w-]*\d+\b/i,
     handler: async (from, text) => {
       const model = extractPrinterModel(text);
       setUserModel(from, model);
@@ -69,11 +69,12 @@ const commandHandlers = [
   },
 ];
 
-// Main routing: enforce model-first then dispatch
+// Main routing: enforce model-first via extractPrinterModel()
 async function routeIncoming(from, text) {
   const storedModel = getUserModel(from);
-  console.log(`[DEBUG] routeIncoming from=${from}, text="${text}", storedModel=${storedModel}`);
-  if (!storedModel && !/(?:tsc|zebra)\s*[\w-]*\d+/i.test(text)) {
+  const modelInMsg = extractPrinterModel(text);
+  console.log(`[DEBUG] Incoming="${text}", storedModel="${storedModel}", extractedModel="${modelInMsg}"`);
+  if (!storedModel && !modelInMsg) {
     return 'Please tell me your printer model first (e.g. "TSC TTP-247" or "Zebra GK420d"), so I can assist you properly.';
   }
   for (const { pattern, handler } of commandHandlers) {
