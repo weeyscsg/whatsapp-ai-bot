@@ -4,64 +4,47 @@ import dotenv from 'dotenv';
 import axios from 'axios';
 import OpenAI from 'openai';
 
-// Load environment variables
 dotenv.config();
-
 const app = express();
 app.use(bodyParser.json());
 
-// Initialize OpenAI client (v4.x default export)
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// In-memory store for user printer models with 48h expiry
+// In-memory 48h model store
 const userModels = new Map();
 function getUserModel(from) {
-  const entry = userModels.get(from);
-  if (!entry || Date.now() > entry.expires) {
-    userModels.delete(from);
-    return null;
-  }
-  return entry.model;
+  const e = userModels.get(from);
+  if (!e || Date.now()>e.expires) return userModels.delete(from), null;
+  return e.model;
 }
-function setUserModel(from, model) {
-  userModels.set(from, {
-    model,
-    expires: Date.now() + 48 * 3600 * 1000
-  });
+function setUserModel(from, m) {
+  userModels.set(from, { model: m, expires: Date.now()+48*3600*1000 });
 }
 
-// Utility to extract a real TSC or Zebra model code, e.g. "TSC TTP-247"
-function extractPrinterModel(message) {
-  if (!message || typeof message !== 'string') return null;
-  const match = message.match(/\b(?:tsc|zebra)\s*[\w-]*\d+\b/i);
-  return match ? match[0] : null;
+// Extract only real TSC/Zebra model strings
+function extractPrinterModel(msg) {
+  const m = msg.match(/\b(?:tsc|zebra)\s*[\w-]*\d+\b/i);
+  return m ? m[0] : null;
 }
 
-// Define intent handlers
 const commandHandlers = [
   { pattern: /\b(hi|hello)\b/i, handler: handleGreeting },
   { pattern: /\b(driver|download driver)\b/i, handler: handleDriverDownload },
   {
-    // TSC or Zebra labeling software
-    pattern: /(?:tsc.*software|label(?:ing)?.*software|software.*(?:tsc|zebra)|zebra.*software|download.*software)/i,
+    pattern: /(?:software|download.*software)/i,
     handler: handleSoftwareLink
   },
   {
-    // Windows or installation driver
-    pattern: /(?:tsc.*(?:windows?|win)\s*driver|zebra.*(?:windows?|win)\s*driver|windows?\s*driver|install(?:ation)?\s*driver|driver\s*install(?:ation)?)/i,
+    pattern: /(?:windows?.*driver|install(?:ation)?.*driver)/i,
     handler: handleWindowsDriverLink
   },
   {
-    // Driver configuration keywords
-    pattern: /(?:tsc.*driver.*config(?:uration)?|zebra.*driver.*config(?:uration)?|driver.*config(?:uration)?|configure.*driver|advanced? settings|driver properties|printer preferences|preferences|adjust.*(?:speed|darkness|density|dpi|resolution)|(?:lighter|darker|light|dark).*(?:print|printout)|fade(?:d)?|fading|calibrat(?:e|ion)|print faint|quality settings)/i,
+    pattern: /(?:driver.*config|configure.*driver|advanced? settings|adjust.*(?:speed|darkness|dpi|resolution)|fade(?:d)?|fading)/i,
     handler: handleDriverConfig
   },
   {
-    // Printer model codes only
     pattern: /\b(?:tsc|zebra)\s*[\w-]*\d+\b/i,
-    handler: async (from, text) => {
+    handler: async (from,text) => {
       const model = extractPrinterModel(text);
       setUserModel(from, model);
       return `Got it! I'll remember your printer model: ${model}`;
@@ -69,86 +52,52 @@ const commandHandlers = [
   },
 ];
 
-// Main routing: enforce model-first via extractPrinterModel()
 async function routeIncoming(from, text) {
-  const storedModel = getUserModel(from);
-  const modelInMsg = extractPrinterModel(text);
-  console.log(`[DEBUG] Incoming="${text}", storedModel="${storedModel}", extractedModel="${modelInMsg}"`);
-  if (!storedModel && !modelInMsg) {
-    return 'Please tell me your printer model first (e.g. "TSC TTP-247" or "Zebra GK420d"), so I can assist you properly.';
+  const stored = getUserModel(from);
+  const found = extractPrinterModel(text);
+  if (!stored && !found) {
+    return 'Please tell me your printer model first (e.g. "TSC TTP-247" or "Zebra GK420d")…';
   }
-  for (const { pattern, handler } of commandHandlers) {
-    if (pattern.test(text)) {
-      console.log(`[DEBUG] pattern matched: ${pattern}`);
-      return handler(from, text);
-    }
+  for (let {pattern,handler} of commandHandlers) {
+    if (pattern.test(text)) return handler(from,text);
   }
-  console.log('[DEBUG] no pattern matched, using GPT-4 fallback');
-  return handleGPT4Inquiry(from, text);
+  return handleGPT4Inquiry(from,text);
 }
 
-// Generate reply: optionally transcribe audio, then dispatch
-async function generateReply({ from, body, audio }) {
-  let message = body || '';
+async function generateReply({from,body,audio}) {
+  let msg = (body||'').trim();
   if (audio) {
-    try {
-      const { transcribeAudio } = await import('node-whisper');
-      message = await transcribeAudio(audio);
-    } catch (err) {
-      console.warn('Whisper transcription failed:', err);
-    }
+    try { msg = await (await import('node-whisper')).transcribeAudio(audio); }
+    catch{}  
   }
-  return routeIncoming(from, message.trim());
+  return routeIncoming(from,msg);
 }
 
-// Webhook entrypoint
-app.post('/webhook', async (req, res) => {
-  const messages = req.body.entry
-    .flatMap(e => e.changes)
-    .flatMap(c => c.value.messages || []);
-
-  for (const msg of messages) {
-    const from = msg.from;
-    const body = msg.text?.body || '';
-    const audio = msg.audio?.id;
-    try {
-      const reply = await generateReply({ from, body, audio });
-      if (typeof reply === 'string' && reply) {
-        await sendText(from, reply);
-      }
-    } catch (err) {
-      console.error('Error handling message:', err);
-      await sendText(from, 'Oops, something went wrong.');
-    }
+app.post('/webhook', async (req,res) => {
+  const msgs = req.body.entry.flatMap(e=>e.changes).flatMap(c=>c.value.messages||[]);
+  for (let m of msgs) {
+    const reply = await generateReply({ from:m.from, body:m.text?.body, audio:m.audio?.id });
+    if (reply) await sendText(m.from,reply);
   }
   res.sendStatus(200);
 });
 
-// Start server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Bot running on port ${PORT}`));
+app.listen(process.env.PORT||3000,()=>console.log('Bot up'));
 
-// --- Handlers ---
+// ── HANDLERS ─────────────────────────────────────────────
+async function handleGreeting(){ return 'Hello! How can I assist you today?'; }
 
-async function handleGreeting(from, text) {
-  return 'Hello! How can I assist you today?';
-}
-
-async function handleDriverDownload(from, text) {
-  const model = getUserModel(from) || '';
-  if (/tsc/i.test(model)) {
-    return 'Download TSC drivers here: https://wa.me/p/7261706730612270/60102317781';
-  }
-  if (/zebra/i.test(model)) {
-    return 'Download Zebra drivers here: https://www.zebra.com/us/en/support-downloads/drivers.html';
-  }
+async function handleDriverDownload(from){
+  const model = getUserModel(from)||'';
+  if (/tsc/i.test(model)) return 'Download TSC drivers here: https://wa.me/p/7261706730612270/60102317781';
+  if (/zebra/i.test(model)) return 'Download Zebra drivers here: https://www.zebra.com/us/en/support-downloads/drivers.html';
   return 'Here is a generic driver download page: https://wa.me/p/7261706730612270/60102317781';
 }
 
-async function handleSoftwareLink(from, text) {
-  const model = getUserModel(from) || '';
+async function handleSoftwareLink(from){
+  const model = getUserModel(from)||'';
   if (/tsc/i.test(model)) {
-    return "Here's the TSC Labeling Software link: https://wa.me/p/25438061125807295/60102317781";
+    return "Here's your TSC Bartender software link:\nhttps://wa.me/p/25438061125807295/60102317781";
   }
   if (/zebra/i.test(model)) {
     return 'Here is the Zebra Labeling Software page: https://www.zebra.com/us/en/support-downloads/software.html';
@@ -156,50 +105,34 @@ async function handleSoftwareLink(from, text) {
   return 'Please confirm your printer brand so I can send the correct software link.';
 }
 
-async function handleWindowsDriverLink(from, text) {
-  const model = getUserModel(from) || '';
-  if (/tsc/i.test(model)) {
-    return "Here's the TSC Windows/installation driver link: https://wa.me/p/7261706730612270/60102317781";
-  }
-  if (/zebra/i.test(model)) {
-    return 'Here is the Zebra Windows driver download: https://www.zebra.com/us/en/support-downloads/drivers.html';
-  }
+async function handleWindowsDriverLink(from){
+  const model = getUserModel(from)||'';
+  if (/tsc/i.test(model)) return "Here's the TSC Windows driver link: https://wa.me/p/7261706730612270/60102317781";
+  if (/zebra/i.test(model)) return 'Here is the Zebra Windows driver: https://www.zebra.com/us/en/support-downloads/drivers.html';
   return 'Please confirm your printer brand so I can send the correct Windows driver link.';
 }
 
-async function handleDriverConfig(from, text) {
-  const model = getUserModel(from) || '';
-  if (/tsc/i.test(model)) {
-    return 'For TSC printer driver configuration (speed, darkness, print quality), check this tutorial: https://wa.me/p/8073532716014276/60102317781';
-  }
-  if (/zebra/i.test(model)) {
-    return 'For Zebra printer driver configuration, see this guide: https://www.zebra.com/us/en/support-downloads/knowledge-articles.html';
-  }
-  return 'Please confirm your printer brand for the correct configuration guide.';
+async function handleDriverConfig(from){
+  const model = getUserModel(from)||'';
+  if (/tsc/i.test(model)) return 'For TSC driver config (speed/darkness), see: https://wa.me/p/8073532716014276/60102317781';
+  if (/zebra/i.test(model)) return 'For Zebra driver config, see: https://www.zebra.com/us/en/support-downloads/knowledge-articles.html';
+  return 'Please confirm your printer brand for the right configuration guide.';
 }
 
-async function handleGPT4Inquiry(from, text) {
-  const completion = await openai.chat.completions.create({
-    model: 'gpt-4-turbo',
-    messages: [{ role: 'user', content: text }],
+async function handleGPT4Inquiry(from,text){
+  const r = await openai.chat.completions.create({
+    model:'gpt-4-turbo', messages:[{role:'user',content:text}]
   });
-  return completion.choices[0].message.content;
+  return r.choices[0].message.content;
 }
 
-// --- WhatsApp sender ---
-
-async function sendText(to, msg) {
-  try {
-    const url = `https://graph.facebook.com/v15.0/${process.env.PHONE_NUMBER_ID}/messages`;
-    const payload = {
-      messaging_product: 'whatsapp',
-      to,
-      text: { body: msg },
-    };
-    const headers = { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}` };
-    await axios.post(url, payload, { headers });
-    console.log(`[DEBUG] Sent to ${to}: ${msg}`);
-  } catch (error) {
-    console.error('Failed to send message:', error.response?.data || error);
-  }
+// ── SENDER ────────────────────────────────────────────────
+async function sendText(to,msg){
+  try{
+    await axios.post(
+      `https://graph.facebook.com/v15.0/${process.env.PHONE_NUMBER_ID}/messages`,
+      { messaging_product:'whatsapp', to, text:{ body:msg } },
+      { headers:{ Authorization:`Bearer ${process.env.WHATSAPP_TOKEN}` } }
+    );
+  }catch(e){ console.error('sendText error',e.response?.data||e); }
 }
