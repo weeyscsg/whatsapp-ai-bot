@@ -1,95 +1,127 @@
+import express from 'express';
+import bodyParser from 'body-parser';
+import dotenv from 'dotenv';
+import { Configuration, OpenAIApi } from 'openai';
 
-const express = require('express');
-const axios = require('axios');
-const bodyParser = require('body-parser');
-const { OpenAI } = require('openai');
-const fs = require('fs');
-const whisper = require('node-whisper');
-const path = require('path');
+// Load environment variables
+dotenv.config();
 
 const app = express();
 app.use(bodyParser.json());
-const port = process.env.PORT || 3000;
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// OpenAI client setup
+const configuration = new Configuration({ apiKey: process.env.OPENAI_API_KEY });
+const openai = new OpenAIApi(configuration);
 
-const sessionMemory = {};
-const SESSION_TTL = 48 * 60 * 60 * 1000; // 48 hours
+// ── COMMAND HANDLERS ────────────────────────────────────────────────────────
+const commandHandlers = [
+  { pattern: /\b(driver|download driver)\b/i, handler: handleDriverDownload },
+  { pattern: /\b(speed|darkness)\b/i, handler: handleDriverConfig },
+  { pattern: /\b(lighter print|light print|print lighter)\b/i, handler: handleLightnessAdvice },
+  { pattern: /\b(model)\b/i, handler: handlePrinterModelMemory },
+];
 
-function resetSessionIfExpired(from) {
-  if (sessionMemory[from]) {
-    const now = Date.now();
-    const lastSeen = sessionMemory[from].timestamp;
-    if (now - lastSeen > SESSION_TTL) {
-      delete sessionMemory[from];
+// ── UTILITIES ───────────────────────────────────────────────────────────────
+/**
+ * Safely extract TSC printer model like "TSC TTP-247" from a string
+ */
+function extractPrinterModel(message) {
+  if (!message || typeof message !== 'string') return null;
+  const match = message.match(/tsc\s*(\w+\d+)/i);
+  return match ? match[1] : null;
+}
+
+// ── ROUTING / DISPATCH ────────────────────────────────────────────────────────
+async function routeIncoming(from, text) {
+  for (const { pattern, handler } of commandHandlers) {
+    if (pattern.test(text)) {
+      return handler(from, text);
     }
   }
+  return handleGPT4Inquiry(from, text);
 }
 
-function updateSession(from, data = {}) {
-  sessionMemory[from] = {
-    ...sessionMemory[from],
-    ...data,
-    timestamp: Date.now(),
-  };
-}
-
-function extractPrinterModel(message) {
-  const match = message.match(/tsc\s*(\w+\d+)/i);
-  return match ? match[0] : null;
-}
-
-async function transcribeAudio(mediaUrl) {
-  const response = await axios.get(mediaUrl, { responseType: 'arraybuffer' });
-  const filePath = path.join(__dirname, 'temp.ogg');
-  fs.writeFileSync(filePath, response.data);
-  const result = await whisper.transcribe(filePath);
-  return result.text;
-}
-
+// ── MAIN REPLY GENERATOR ────────────────────────────────────────────────────
 async function generateReply({ from, body, audio }) {
-  resetSessionIfExpired(from);
+  // Always default to a string
+  let message = body || '';
 
-  let message = body;
+  // Try audio transcription if provided
   if (audio) {
     try {
+      const { transcribeAudio } = await import('node-whisper');
       message = await transcribeAudio(audio);
     } catch (err) {
-      return "Sorry, I couldn't process the audio. Please try again.";
+      console.warn('Whisper transcription failed:', err);
+      // fallback to text body
     }
   }
 
+  // Extract and store printer model if mentioned
   const model = extractPrinterModel(message);
   if (model) {
-    updateSession(from, { printerModel: model });
+    await handlePrinterModelMemory(from, model);
   }
 
-  const userSession = sessionMemory[from] || {};
-  if (!userSession.printerModel) {
-    updateSession(from);
-    return "Before I assist, may I know your printer model?";
-  }
-
-  const printer = userSession.printerModel.toLowerCase();
-  let systemPrompt = `You are a multilingual TSC/Zebra printer support bot. Printer model: ${printer}. Reply in the same language as the user's question. If the user asks about "driver", "install software", or "BarTender", suggest the correct tutorial link.`;
-
-  const prompt = [
-    { role: "system", content: systemPrompt },
-    { role: "user", content: message },
-  ];
-
-  const chat = await openai.chat.completions.create({
-    model: "gpt-4",
-    messages: prompt,
-  });
-
-  return chat.choices[0].message.content;
+  // Dispatch or fallback
+  return routeIncoming(from, message);
 }
 
+// ── WEBHOOK HANDLER ─────────────────────────────────────────────────────────
 app.post('/webhook', async (req, res) => {
-  const { from, body, audio } = req.body;
-  const reply = await generateReply({ from, body, audio });
-  res.json({ reply });
+  const messages = req.body.entry
+    .flatMap(e => e.changes)
+    .flatMap(c => c.value.messages || []);
+
+  for (const msg of messages) {
+    const from = msg.from;
+    const body = msg.text?.body || '';
+    const audio = msg.audio?.id;
+
+    try {
+      const reply = await generateReply({ from, body, audio });
+      await sendText(from, reply);
+    } catch (err) {
+      console.error('Error handling message:', err);
+      await sendText(from, 'Oops, something went wrong.');
+    }
+  }
+
+  res.sendStatus(200);
 });
 
-app.listen(port, () => console.log(`Bot running on port ${port}`));
+// ── START SERVER ───────────────────────────────────────────────────────────
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Bot running on port ${PORT}`));
+
+// ── PLACEHOLDER HANDLERS ────────────────────────────────────────────────────
+async function handleDriverDownload(from, text) {
+  return sendText(from, 'Download TSC drivers here: https://www.tscprinters.com/DriverDownload');
+}
+async function handleDriverConfig(from, text) {
+  return sendText(from, 'Adjust speed/darkness under Advanced settings in your TSC driver.');
+}
+async function handleLightnessAdvice(from, text) {
+  return sendText(from, 'If prints are too light, increase darkness by 1–2 levels in driver settings.');
+}
+async function handlePrinterModelMemory(from, model) {
+  // TODO: store per-user model memory with 48h expiry
+  return sendText(from, `Got it! Remembering your printer model: ${model}`);
+}
+async function handleGPT4Inquiry(from, text) {
+  const resp = await openai.createChatCompletion({
+    model: 'gpt-4-turbo',
+    messages: [{ role: 'user', content: text }],
+  });
+  return sendText(from, resp.data.choices[0].message.content);
+}
+
+// ── WHATSAPP SENDER ─────────────────────────────────────────────────────────
+async function sendText(to, msg) {
+  // Implement your Meta/WhatsApp API call here:
+  // await axios.post(
+  //   `https://graph.facebook.com/v15.0/${process.env.PHONE_NUMBER_ID}/messages`,
+  //   { messaging_product: 'whatsapp', to, text: { body: msg } },
+  //   { headers: { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}` } }
+  // );
+}
