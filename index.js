@@ -10,13 +10,14 @@ dotenv.config();
 const app = express();
 app.use(bodyParser.json());
 
-// Initialize OpenAI client with default export (v4.x)
+// Initialize OpenAI client (v4.x default export)
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
 // ── COMMAND HANDLERS ────────────────────────────────────────────────────────
 const commandHandlers = [
+  { pattern: /\b(hi|hello)\b/i, handler: handleGreeting },
   { pattern: /\b(driver|download driver)\b/i, handler: handleDriverDownload },
   { pattern: /\b(speed|darkness)\b/i, handler: handleDriverConfig },
   { pattern: /\b(lighter print|light print|print lighter)\b/i, handler: handleLightnessAdvice },
@@ -42,8 +43,10 @@ async function routeIncoming(from, text) {
 
 // ── MAIN REPLY GENERATOR ────────────────────────────────────────────────────
 async function generateReply({ from, body, audio }) {
+  // Always default to a string
   let message = body || '';
 
+  // Try audio transcription if provided
   if (audio) {
     try {
       const { transcribeAudio } = await import('node-whisper');
@@ -53,11 +56,13 @@ async function generateReply({ from, body, audio }) {
     }
   }
 
+  // Store printer model memory if mentioned
   const model = extractPrinterModel(message);
   if (model) {
     await handlePrinterModelMemory(from, model);
   }
 
+  // Determine reply
   return routeIncoming(from, message);
 }
 
@@ -74,7 +79,10 @@ app.post('/webhook', async (req, res) => {
 
     try {
       const reply = await generateReply({ from, body, audio });
-      await sendText(from, reply);
+      // Only send if we got a string back
+      if (typeof reply === 'string' && reply.length) {
+        await sendText(from, reply);
+      }
     } catch (err) {
       console.error('Error handling message:', err);
       await sendText(from, 'Oops, something went wrong.');
@@ -89,26 +97,28 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Bot running on port ${PORT}`));
 
 // ── HANDLER FUNCTIONS ───────────────────────────────────────────────────────
+async function handleGreeting(from, text) {
+  return 'Hello! How can I assist you today?';
+}
 async function handleDriverDownload(from, text) {
-  return sendText(from, 'Download TSC drivers here: https://www.tscprinters.com/DriverDownload');
+  return 'Download TSC drivers here: https://www.tscprinters.com/DriverDownload';
 }
 async function handleDriverConfig(from, text) {
-  return sendText(from, 'Adjust speed/darkness under Advanced settings in your TSC driver.');
+  return 'Adjust speed/darkness under Advanced settings in your TSC driver.';
 }
 async function handleLightnessAdvice(from, text) {
-  return sendText(from, 'If prints are too light, increase darkness by 1–2 levels in driver settings.');
+  return 'If prints are too light, increase darkness by 1–2 levels in driver settings.';
 }
 async function handlePrinterModelMemory(from, model) {
-  // TODO: store per-user model memory with 48h expiry
-  return sendText(from, `Got it! Remembering your printer model: ${model}`);
+  // TODO: store per-user printer model memory with 48h expiry
+  return `Got it! Remembering your printer model: ${model}`;
 }
 async function handleGPT4Inquiry(from, text) {
-  // Use new chat.completions API for v4.x
   const completion = await openai.chat.completions.create({
     model: 'gpt-4-turbo',
     messages: [{ role: 'user', content: text }],
   });
-  return sendText(from, completion.choices[0].message.content);
+  return completion.choices[0].message.content;
 }
 
 // ── WHATSAPP SENDER ─────────────────────────────────────────────────────────
@@ -121,7 +131,7 @@ async function sendText(to, msg) {
       text: { body: msg },
     };
     const headers = { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}` };
-    const resp = await axios.post(url, payload, { headers });
+    await axios.post(url, payload, { headers });
     console.log(`Sent message to ${to}: ${msg}`);
   } catch (error) {
     console.error('Failed to send message:', error.response?.data || error);
