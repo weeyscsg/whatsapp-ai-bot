@@ -155,7 +155,7 @@ app.post('/webhook', async (req, res) => {
       await axios.post(
         `https://graph.facebook.com/v15.0/${process.env.PHONE_NUMBER_ID}/messages`,
         { messaging_product:'whatsapp', to:m.from, text:{ body:reply } },
-        { headers:{ Authorization:\`Bearer ${process.env.WHATSAPP_TOKEN}\` } }
+        { headers:{ Authorization:`Bearer ${process.env.WHATSAPP_TOKEN}` } }
       );
     }
   }
@@ -163,4 +163,4 @@ app.post('/webhook', async (req, res) => {
 });
 
 const PORT = process.env.PORT||3000;
-app.listen(PORT, ()=>console.log(\`Bot running on port \${PORT}\`));
+app.listen(PORT, ()=>console.log(`Bot running on port ${PORT}`));
