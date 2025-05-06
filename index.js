@@ -39,7 +39,11 @@ const commandHandlers = [
   { pattern: /\b(driver|download driver)\b/i, handler: handleDriverDownload },
   { pattern: /(?:software|download.*software)/i, handler: handleSoftwareLink },
   { pattern: /(?:windows?.*driver|install(?:ation)?.*driver)/i, handler: handleWindowsDriverLink },
-  { pattern: /(?:driver.*config|configure.*driver|advanced? settings|adjust.*(?:speed|darkness|dpi|resolution)|fade(?:d)?|fading|calibrat(?:e|ion))/i, handler: handleDriverConfig },
+  {
+    // Matches configuration, calibration, jams, out-of-paper, etc.
+    pattern: /(?:driver.*config|configure.*driver|advanced? settings|adjust.*(?:speed|darkness|dpi|resolution)|fade(?:d)?|fading|calibrat(?:e|ion)|paper\s*jam|jam\b|out\s*of\s*paper|no\s*paper|print faint|quality settings)/i,
+    handler: handleDriverConfig
+  },
   { pattern: /\b(?:tsc|zebra)\s*[\w-]*\d+\b/i,
     handler: async (from, text) => {
       const model = extractPrinterModel(text);
@@ -107,7 +111,6 @@ async function handleDriverDownload(from) {
 async function handleSoftwareLink(from) {
   const model = getUserModel(from) || '';
   if (/tsc/i.test(model)) {
-    // Fixed single-line string for the TSC Bartender software link
     return "Here's your TSC Bartender software link: https://wa.me/p/25438061125807295/60102317781";
   }
   return handleGPT4Inquiry(from, `Please find the official download URL for the ${model} labeling software.`);
@@ -121,11 +124,15 @@ async function handleWindowsDriverLink(from) {
   return handleGPT4Inquiry(from, `Please find the official Windows driver download URL for the ${model}.`);
 }
 
-async function handleDriverConfig(from) {
+async function handleDriverConfig(from, text) {
   const model = getUserModel(from) || '';
   if (/tsc/i.test(model)) {
-    // Hardcoded TE200 calibration link
-    return 'To calibrate your TSC TE200, see: https://wa.me/p/8073532716014276/60102317781';
+    // For calibration, jams, or out-of-paper issues, use the new tutorial link
+    if (/calibrat|paper\s*jam|jam\b|out\s*of\s*paper|no\s*paper/i.test(text)) {
+      return 'For calibration, paper jams, out-of-paper, and related issues on your TSC printer, please see: https://wa.me/p/6828296190606265/60102317781';
+    }
+    // Otherwise default to driver config tutorial
+    return 'For TSC printer driver configuration (speed, darkness, print quality), check this tutorial: https://wa.me/p/8073532716014276/60102317781';
   }
   return handleGPT4Inquiry(from, `Please provide configuration & calibration steps for the ${model} printer.`);
 }
