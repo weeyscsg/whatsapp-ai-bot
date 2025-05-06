@@ -72,10 +72,11 @@ async function routeIncoming(from, text) {
     }
     setUserSoftware(from);
     if (/tsc/i.test(hasModel)) {
-      return "Here's your TSC Bartender software link:
-https://wa.me/p/25438061125807295/60102317781";
+      // Use a template literal to allow the newline without error
+      return \`Here's your TSC Bartender software link:
+https://wa.me/p/25438061125807295/60102317781\`;
     }
-    return handleGPT4Inquiry(from, `Find the official download URL for the Zebra ${hasModel} labeling software.`);
+    return handleGPT4Inquiry(from, \`Find the official download URL for the Zebra \${hasModel} labeling software.\`);
   }
 
   // Printer driver request
@@ -86,7 +87,7 @@ https://wa.me/p/25438061125807295/60102317781";
     if (/tsc/i.test(hasModel)) {
       return 'Download TSC drivers here: https://wa.me/p/7261706730612270/60102317781';
     }
-    return handleGPT4Inquiry(from, `Please find the official download URL for the ${hasModel} printer driver.`);
+    return handleGPT4Inquiry(from, \`Please find the official download URL for the \${hasModel} printer driver.\`);
   }
 
   // Fallback
@@ -96,7 +97,7 @@ https://wa.me/p/25438061125807295/60102317781";
 async function handleGPT4Inquiry(from, userText) {
   const model = getUserModel(from);
   const systemPrompt = model
-    ? `You are a printer support assistant. The user’s printer model is ${model}.`
+    ? \`You are a printer support assistant. The user’s printer model is \${model}.\`
     : 'You are a printer support assistant.';
   const resp = await openai.chat.completions.create({
     model: 'gpt-4-turbo',
@@ -116,9 +117,9 @@ app.post('/webhook', async (req, res) => {
     const reply = await routeIncoming(msg.from, msg.text?.body);
     if (reply) {
       await axios.post(
-        `https://graph.facebook.com/v15.0/${process.env.PHONE_NUMBER_ID}/messages`,
+        \`https://graph.facebook.com/v15.0/\${process.env.PHONE_NUMBER_ID}/messages\`,
         { messaging_product: 'whatsapp', to: msg.from, text: { body: reply } },
-        { headers: { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}` } }
+        { headers: { Authorization: \`Bearer \${process.env.WHATSAPP_TOKEN}\` } }
       );
     }
   }
@@ -126,4 +127,4 @@ app.post('/webhook', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Bot running on port ${PORT}`));
+app.listen(PORT, () => console.log(\`Bot running on port \${PORT}\`));
