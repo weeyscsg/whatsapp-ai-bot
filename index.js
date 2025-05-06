@@ -1,7 +1,7 @@
 import express from 'express';
 import bodyParser from 'body-parser';
 import dotenv from 'dotenv';
-import { Configuration, OpenAIApi } from 'openai';
+import OpenAI from 'openai';
 
 // Load environment variables
 dotenv.config();
@@ -9,9 +9,8 @@ dotenv.config();
 const app = express();
 app.use(bodyParser.json());
 
-// OpenAI client setup
-const configuration = new Configuration({ apiKey: process.env.OPENAI_API_KEY });
-const openai = new OpenAIApi(configuration);
+// Initialize OpenAI client (as ES module with default export)
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // ── COMMAND HANDLERS ────────────────────────────────────────────────────────
 const commandHandlers = [
@@ -22,9 +21,6 @@ const commandHandlers = [
 ];
 
 // ── UTILITIES ───────────────────────────────────────────────────────────────
-/**
- * Safely extract TSC printer model like "TSC TTP-247" from a string
- */
 function extractPrinterModel(message) {
   if (!message || typeof message !== 'string') return null;
   const match = message.match(/tsc\s*(\w+\d+)/i);
@@ -43,27 +39,20 @@ async function routeIncoming(from, text) {
 
 // ── MAIN REPLY GENERATOR ────────────────────────────────────────────────────
 async function generateReply({ from, body, audio }) {
-  // Always default to a string
   let message = body || '';
-
-  // Try audio transcription if provided
   if (audio) {
     try {
       const { transcribeAudio } = await import('node-whisper');
       message = await transcribeAudio(audio);
     } catch (err) {
       console.warn('Whisper transcription failed:', err);
-      // fallback to text body
     }
   }
 
-  // Extract and store printer model if mentioned
   const model = extractPrinterModel(message);
   if (model) {
     await handlePrinterModelMemory(from, model);
   }
-
-  // Dispatch or fallback
   return routeIncoming(from, message);
 }
 
@@ -77,7 +66,6 @@ app.post('/webhook', async (req, res) => {
     const from = msg.from;
     const body = msg.text?.body || '';
     const audio = msg.audio?.id;
-
     try {
       const reply = await generateReply({ from, body, audio });
       await sendText(from, reply);
@@ -86,7 +74,6 @@ app.post('/webhook', async (req, res) => {
       await sendText(from, 'Oops, something went wrong.');
     }
   }
-
   res.sendStatus(200);
 });
 
@@ -94,7 +81,7 @@ app.post('/webhook', async (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Bot running on port ${PORT}`));
 
-// ── PLACEHOLDER HANDLERS ────────────────────────────────────────────────────
+// ── HANDLER FUNCTIONS ───────────────────────────────────────────────────────
 async function handleDriverDownload(from, text) {
   return sendText(from, 'Download TSC drivers here: https://www.tscprinters.com/DriverDownload');
 }
@@ -105,23 +92,19 @@ async function handleLightnessAdvice(from, text) {
   return sendText(from, 'If prints are too light, increase darkness by 1–2 levels in driver settings.');
 }
 async function handlePrinterModelMemory(from, model) {
-  // TODO: store per-user model memory with 48h expiry
   return sendText(from, `Got it! Remembering your printer model: ${model}`);
 }
 async function handleGPT4Inquiry(from, text) {
-  const resp = await openai.createChatCompletion({
+  const resp = await openai.chat.completions.create({
     model: 'gpt-4-turbo',
     messages: [{ role: 'user', content: text }],
   });
-  return sendText(from, resp.data.choices[0].message.content);
+  return sendText(from, resp.choices[0].message.content);
 }
 
 // ── WHATSAPP SENDER ─────────────────────────────────────────────────────────
 async function sendText(to, msg) {
-  // Implement your Meta/WhatsApp API call here:
-  // await axios.post(
-  //   `https://graph.facebook.com/v15.0/${process.env.PHONE_NUMBER_ID}/messages`,
-  //   { messaging_product: 'whatsapp', to, text: { body: msg } },
-  //   { headers: { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}` } }
-  // );
+  // Implement Meta/WhatsApp API call here
 }
+
+// Note: to run as ES module, add "type": "module" to your package.json root. (See warning in logs.)
