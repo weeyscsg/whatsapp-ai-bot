@@ -44,24 +44,23 @@ const commandHandlers = [
   { pattern: /(hi|hello)/i, handler: handleGreeting },
   { pattern: /(driver|download driver)/i, handler: handleDriverDownload },
   {
-    // TSC labeling software or Zebra software
-    pattern: /(?:tsc.*software|label(?:ing)?.*software|software.*tsc|software.*label(?:ing)?|zebra.*software|software.*zebra)/i,
+    // TSC or Zebra labeling software
+    pattern: /(?:tsc.*software|label(?:ing)?.*software|software.*(?:tsc|zebra)|zebra.*software|download.*software)/i,
     handler: handleSoftwareLink
   },
   {
     // Windows or installation driver
-    pattern: /(?:tsc.*(?:windows?|win)\s*driver|windows?\s*driver|install(?:ation)?\s*driver|driver\s*install(?:ation)?)/i,
+    pattern: /(?:tsc.*(?:windows?|win)\s*driver|zebra.*(?:windows?|win)\s*driver|windows?\s*driver|install(?:ation)?\s*driver|driver\s*install(?:ation)?)/i,
     handler: handleWindowsDriverLink
   },
   {
-    // Driver configuration, speed, darkness, density, dpi, resolution,
-    // driver properties, printer preferences, advanced settings, calibration, etc.
-    pattern: /(?:tsc.*driver.*config(?:uration)?|driver.*config(?:uration)?|configure.*driver|advanced? settings|driver properties|printer preferences|preferences|adjust.*(?:speed|darkness|density|dpi|resolution)|(?:lighter|darker|light|dark).*(?:print|printout)|fade(?:d)?|fading|calibrat(?:e|ion)|print faint|quality settings)/i,
+    // Driver configuration keywords
+    pattern: /(?:tsc.*driver.*config(?:uration)?|zebra.*driver.*config(?:uration)?|driver.*config(?:uration)?|configure.*driver|advanced? settings|driver properties|printer preferences|preferences|adjust.*(?:speed|darkness|density|dpi|resolution)|(?:lighter|darker|light|dark).*(?:print|printout)|fade(?:d)?|fading|calibrat(?:e|ion)|print faint|quality settings)/i,
     handler: handleDriverConfig
   },
   {
     // Printer model codes only
-    pattern: /(tsc|zebra)\s*[\w-]*\d+/i,
+    pattern: /(?:tsc|zebra)\s*[\w-]*\d+/i,
     handler: async (from, text) => {
       const model = extractPrinterModel(text);
       setUserModel(from, model);
@@ -73,14 +72,17 @@ const commandHandlers = [
 // Main routing: enforce model-first then dispatch
 async function routeIncoming(from, text) {
   const storedModel = getUserModel(from);
+  console.log(`[DEBUG] routeIncoming from=${from}, text="${text}", storedModel=${storedModel}`);
   if (!storedModel && !/(?:tsc|zebra)\s*[\w-]*\d+/i.test(text)) {
     return 'Please tell me your printer model first (e.g. "TSC TTP-247" or "Zebra GK420d"), so I can assist you properly.';
   }
   for (const { pattern, handler } of commandHandlers) {
     if (pattern.test(text)) {
+      console.log(`[DEBUG] pattern matched: ${pattern}`);
       return handler(from, text);
     }
   }
+  console.log('[DEBUG] no pattern matched, using GPT-4 fallback');
   return handleGPT4Inquiry(from, text);
 }
 
@@ -95,7 +97,7 @@ async function generateReply({ from, body, audio }) {
       console.warn('Whisper transcription failed:', err);
     }
   }
-  return routeIncoming(from, message);
+  return routeIncoming(from, message.trim());
 }
 
 // Webhook entrypoint
@@ -139,7 +141,7 @@ async function handleDriverDownload(from, text) {
   if (/zebra/i.test(model)) {
     return 'Download Zebra drivers here: https://www.zebra.com/us/en/support-downloads/drivers.html';
   }
-  return 'Here is a generic driver download page: https://www.tscprinters.com/DriverDownload';
+  return 'Here is a generic driver download page: https://wa.me/p/7261706730612270/60102317781';
 }
 
 async function handleSoftwareLink(from, text) {
@@ -195,7 +197,7 @@ async function sendText(to, msg) {
     };
     const headers = { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}` };
     await axios.post(url, payload, { headers });
-    console.log(`Sent message to ${to}: ${msg}`);
+    console.log(`[DEBUG] Sent to ${to}: ${msg}`);
   } catch (error) {
     console.error('Failed to send message:', error.response?.data || error);
   }
