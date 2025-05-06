@@ -19,8 +19,21 @@ const openai = new OpenAI({
 const commandHandlers = [
   { pattern: /\b(hi|hello)\b/i, handler: handleGreeting },
   { pattern: /\b(driver|download driver)\b/i, handler: handleDriverDownload },
-  { pattern: /\b(speed|darkness)\b/i, handler: handleDriverConfig },
-  { pattern: /\b(lighter print|light print|print lighter)\b/i, handler: handleLightnessAdvice },
+  {
+    // Matches queries about TSC software or labeling software
+    pattern: /(?:tsc.*software|label(?:ing)?.*software|software.*tsc|software.*label(?:ing)?)/i,
+    handler: handleSoftwareLink
+  },
+  {
+    // Matches TSC Windows driver or installation driver queries
+    pattern: /(?:tsc.*(?:windows?|win)\s*driver|windows?\s*driver|install(?:ation)?\s*driver|driver\s*install(?:ation)?)/i,
+    handler: handleWindowsDriverLink
+  },
+  {
+    // Matches driver configuration, speed, darkness, print lighter/darker, fading, etc.
+    pattern: /(?:tsc.*driver.*config(?:uration)?|driver.*config(?:uration)?|configure.*driver|driver settings|adjust.*(?:speed|darkness)|(?:lighter|darker|light|dark).*(?:print|printout)|fading|print faint)/i,
+    handler: handleDriverConfig
+  },
   { pattern: /\b(model)\b/i, handler: handlePrinterModelMemory },
 ];
 
@@ -43,10 +56,8 @@ async function routeIncoming(from, text) {
 
 // ── MAIN REPLY GENERATOR ────────────────────────────────────────────────────
 async function generateReply({ from, body, audio }) {
-  // Always default to a string
   let message = body || '';
 
-  // Try audio transcription if provided
   if (audio) {
     try {
       const { transcribeAudio } = await import('node-whisper');
@@ -56,13 +67,11 @@ async function generateReply({ from, body, audio }) {
     }
   }
 
-  // Store printer model memory if mentioned
   const model = extractPrinterModel(message);
   if (model) {
     await handlePrinterModelMemory(from, model);
   }
 
-  // Determine reply
   return routeIncoming(from, message);
 }
 
@@ -79,8 +88,7 @@ app.post('/webhook', async (req, res) => {
 
     try {
       const reply = await generateReply({ from, body, audio });
-      // Only send if we got a string back
-      if (typeof reply === 'string' && reply.length) {
+      if (typeof reply === 'string' && reply) {
         await sendText(from, reply);
       }
     } catch (err) {
@@ -100,19 +108,28 @@ app.listen(PORT, () => console.log(`Bot running on port ${PORT}`));
 async function handleGreeting(from, text) {
   return 'Hello! How can I assist you today?';
 }
+
 async function handleDriverDownload(from, text) {
-  return 'Download TSC drivers here: https://www.tscprinters.com/DriverDownload';
+  return 'Download TSC drivers here: https://wa.me/p/7261706730612270/60102317781';
 }
+
+async function handleSoftwareLink(from, text) {
+  return 'Here's the TSC Labeling Software link: https://wa.me/p/25438061125807295/60102317781';
+}
+
+async function handleWindowsDriverLink(from, text) {
+  return 'Here's the TSC Windows/installation driver link: https://wa.me/p/7261706730612270/60102317781';
+}
+
 async function handleDriverConfig(from, text) {
-  return 'Adjust speed/darkness under Advanced settings in your TSC driver.';
+  return 'For printer driver configuration (speed, darkness, print quality), check this tutorial: https://wa.me/p/8073532716014276/60102317781';
 }
-async function handleLightnessAdvice(from, text) {
-  return 'If prints are too light, increase darkness by 1–2 levels in driver settings.';
-}
+
 async function handlePrinterModelMemory(from, model) {
   // TODO: store per-user printer model memory with 48h expiry
   return `Got it! Remembering your printer model: ${model}`;
 }
+
 async function handleGPT4Inquiry(from, text) {
   const completion = await openai.chat.completions.create({
     model: 'gpt-4-turbo',
