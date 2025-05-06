@@ -132,20 +132,21 @@ async function handleWindowsDriverLink(from) {
 async function handleDriverConfig(from) {
   const model = getUserModel(from) || '';
   if (/tsc/i.test(model)) {
-    return 'For TSC driver configuration (speed, darkness, print quality), see: https://wa.me/p/8073532716014276/60102317781';
+    return 'For TSC driver configuration (speed, darkness, quality), see: https://wa.me/p/8073532716014276/60102317781';
   }
   if (/zebra/i.test(model)) {
     return handleGPT4Inquiry(from, `Guide me to the official Zebra ${model} driver settings configuration instructions.`);
   }
-  return handleGPT4Inquiry(from, `How do I configure driver settings (speed, darkness, resolution) for ${model||'my printer'}?`);
+  return handleGPT4Inquiry(from, `How do I configure driver settings for ${model||'my printer'}?`);
 }
 
 async function handleGPT4Inquiry(from, text) {
-  const resp = await openai.chat.completions.create({
+  // Correctly handle the response object
+  const completion = await openai.chat.completions.create({
     model: 'gpt-4-turbo',
     messages: [{ role: 'user', content: text }],
   });
-  return resp.data.choices[0].message.content;
+  return completion.choices[0].message.content;
 }
 
 // Send WhatsApp message
@@ -156,7 +157,7 @@ async function sendText(to, msg) {
       { messaging_product: 'whatsapp', to, text: { body: msg } },
       { headers: { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}` } }
     );
-  } catch (e) {
-    console.error('sendText error', e.response?.data||e);
+  } catch (error) {
+    console.error('sendText error', error.response?.data || error);
   }
 }
